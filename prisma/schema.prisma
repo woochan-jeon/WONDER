@@ -1,0 +1,95 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(MEMBER)
+  createdAt    DateTime @default(now())
+
+  createdTasks    Task[]                 @relation("CreatedTasks")
+  assignedTasks   Task[]                 @relation("AssignedTasks")
+  calendarConnection CalendarConnection? @relation("ConnectedBy")
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  createdById String
+  createdBy   User   @relation("CreatedTasks", fields: [createdById], references: [id])
+
+  assignees User[] @relation("AssignedTasks")
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#611f69")
+  createdAt DateTime @default(now())
+
+  tasks Task[]
+}
+
+// Singleton row: the team's shared Google Calendar connection.
+model CalendarConnection {
+  id           String   @id @default(cuid())
+  googleEmail  String
+  calendarId   String   @default("primary")
+  // Drive folder the # 드라이브 channel is scoped to. Null means "My Drive" root.
+  driveRootFolderId   String?
+  driveRootFolderName String?
+  accessToken  String
+  refreshToken String
+  expiryDate   DateTime
+  updatedAt    DateTime @updatedAt
+
+  connectedById String @unique
+  connectedBy   User   @relation("ConnectedBy", fields: [connectedById], references: [id])
+}
+
+// Curated agenda/decision summaries for the # 회의 아카이브 channel, sourced from
+// the Gemini-generated meeting minutes in the Drive "Meet Recordings" folder.
+model MeetingSummary {
+  id          String   @id @default(cuid())
+  driveFileId String   @unique
+  meetingDate DateTime
+  title       String
+  // JSON-encoded { agenda: string, decision: string | null }[] — each agenda
+  // item is paired inline with its decision (or null if still undecided).
+  itemsJson   String
+  sourceUrl   String?
+  createdAt   DateTime @default(now())
+}
