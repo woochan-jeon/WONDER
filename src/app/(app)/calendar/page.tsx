@@ -2,7 +2,13 @@ import ChannelHeader from "@/components/channel-header";
 import CalendarMonthGrid from "@/components/calendar-month-grid";
 import { CalendarPicker, NewEventButton } from "@/components/calendar-toolbar";
 import { getCurrentUser } from "@/lib/auth";
-import { getConnectionStatus, isGoogleOAuthConfigured, listCalendars, listEventsInRange } from "@/lib/google-calendar";
+import {
+  getCalendarColor,
+  getConnectionStatus,
+  isGoogleOAuthConfigured,
+  listCalendars,
+  listEventsInRange,
+} from "@/lib/google-calendar";
 import { getMonthGrid, parseMonthParam } from "@/lib/calendar-grid";
 import { disconnectCalendarAction } from "./actions";
 
@@ -30,9 +36,10 @@ export default async function CalendarPage({
   const gridEndExclusive = new Date(gridEnd);
   gridEndExclusive.setDate(gridEndExclusive.getDate() + 1);
 
-  const [events, calendars] = await Promise.all([
+  const [events, calendars, defaultColor] = await Promise.all([
     status.connected ? listEventsInRange(gridStart, gridEndExclusive) : Promise.resolve([]),
     status.connected && isAdmin ? listCalendars() : Promise.resolve([]),
+    status.connected ? getCalendarColor() : Promise.resolve(null),
   ]);
 
   return (
@@ -99,7 +106,7 @@ export default async function CalendarPage({
             <div className="mb-4">
               <NewEventButton />
             </div>
-            <CalendarMonthGrid year={year} month={month} events={events} />
+            <CalendarMonthGrid year={year} month={month} events={events} defaultColor={defaultColor} />
           </>
         )}
       </div>

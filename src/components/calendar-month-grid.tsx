@@ -35,10 +35,12 @@ export default function CalendarMonthGrid({
   year,
   month,
   events,
+  defaultColor,
 }: {
   year: number;
   month: number;
   events: CalendarEvent[];
+  defaultColor?: string | null;
 }) {
   const { weeks, firstOfMonth } = getMonthGrid(year, month);
   const todayKey = toDateKey(new Date());
@@ -127,7 +129,11 @@ export default function CalendarMonthGrid({
                   <div className="flex flex-col gap-0.5">
                     {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map((event) => {
                       const time = formatEventTime(event);
-                      const color = event.colorId ? EVENT_COLORS[event.colorId] : null;
+                      const color = event.colorId
+                        ? EVENT_COLORS[event.colorId]
+                        : defaultColor
+                          ? { bg: defaultColor, fg: "#ffffff" }
+                          : null;
                       return (
                         <a
                           key={`${event.id}-${key}`}

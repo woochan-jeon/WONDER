@@ -152,6 +152,20 @@ export async function listCalendars(): Promise<CalendarListItem[]> {
     }));
 }
 
+/** Hex background color of the connected calendar itself, used as the default for events with no per-event color override. */
+export async function getCalendarColor(): Promise<string | null> {
+  const authorized = await getAuthorizedClient();
+  if (!authorized) return null;
+
+  const calendar = google.calendar({ version: "v3", auth: authorized.client });
+  const entry = await calendar.calendarList
+    .get({ calendarId: authorized.calendarId })
+    .then((res) => res.data)
+    .catch(() => null);
+
+  return entry?.backgroundColor ?? null;
+}
+
 export async function setCalendarId(calendarId: string) {
   const connection = await prisma.calendarConnection.findFirst();
   if (!connection) throw new Error("연결된 캘린더가 없습니다");
