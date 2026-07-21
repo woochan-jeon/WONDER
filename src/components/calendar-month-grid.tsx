@@ -1,15 +1,10 @@
 import Link from "next/link";
 import type { CalendarEvent } from "@/lib/google-calendar";
-import {
-  eventDateKeyRange,
-  getMonthGrid,
-  monthParam,
-  shiftMonth,
-  toDateKey,
-} from "@/lib/calendar-grid";
+import { eventDayBounds, getMonthGrid, monthParam, shiftMonth, toDateKey } from "@/lib/calendar-grid";
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
-const MAX_VISIBLE_EVENTS = 3;
+const MAX_VISIBLE_LANES = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Google Calendar's fixed event color palette (Colors API "event" set, colorId 1–11).
 const EVENT_COLORS: Record<string, string> = {
@@ -31,6 +26,46 @@ function formatEventTime(event: CalendarEvent) {
   return new Date(event.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 }
 
+type Segment = { event: CalendarEvent; startCol: number; span: number; lane: number };
+
+/** Lays out one week's events into non-overlapping horizontal lanes, like Google Calendar's month view bars. */
+function layoutWeek(week: Date[], events: CalendarEvent[]): Segment[] {
+  const weekStart = week[0];
+  const weekEnd = week[6];
+
+  const raw: { event: CalendarEvent; startCol: number; span: number }[] = [];
+  for (const event of events) {
+    if (!event.start) continue;
+    const { start, end } = eventDayBounds(event.start, event.end, event.allDay);
+    if (end < weekStart || start > weekEnd) continue;
+
+    const segStart = start < weekStart ? weekStart : start;
+    const segEnd = end > weekEnd ? weekEnd : end;
+    const startCol = Math.round((segStart.getTime() - weekStart.getTime()) / DAY_MS);
+    const span = Math.round((segEnd.getTime() - segStart.getTime()) / DAY_MS) + 1;
+    raw.push({ event, startCol, span });
+  }
+
+  // Earlier-starting, then longer events claim lanes first — keeps multi-day bars stable near the top.
+  raw.sort((a, b) => a.startCol - b.startCol || b.span - a.span);
+
+  const lanes: { startCol: number; span: number }[][] = [];
+  const segments: Segment[] = [];
+  for (const seg of raw) {
+    let lane = lanes.findIndex(
+      (existing) =>
+        !existing.some((s) => seg.startCol < s.startCol + s.span && s.startCol < seg.startCol + seg.span),
+    );
+    if (lane === -1) {
+      lane = lanes.length;
+      lanes.push([]);
+    }
+    lanes[lane].push(seg);
+    segments.push({ ...seg, lane });
+  }
+  return segments;
+}
+
 export default function CalendarMonthGrid({
   year,
   month,
@@ -44,15 +79,6 @@ export default function CalendarMonthGrid({
 }) {
   const { weeks, firstOfMonth } = getMonthGrid(year, month);
   const todayKey = toDateKey(new Date());
-
-  const eventsByDay = new Map<string, CalendarEvent[]>();
-  for (const event of events) {
-    if (!event.start) continue;
-    for (const key of eventDateKeyRange(event.start, event.end, event.allDay)) {
-      if (!eventsByDay.has(key)) eventsByDay.set(key, []);
-      eventsByDay.get(key)!.push(event);
-    }
-  }
 
   const prev = shiftMonth(year, month, -1);
   const next = shiftMonth(year, month, 1);
@@ -99,65 +125,104 @@ export default function CalendarMonthGrid({
           ))}
         </div>
 
-        <div className="grid grid-cols-7">
-          {weeks.flatMap((week) =>
-            week.map((day) => {
-              const key = toDateKey(day);
-              const dayEvents = eventsByDay.get(key) ?? [];
-              const inMonth = day.getMonth() === month;
-              const isToday = key === todayKey;
-              const overflow = dayEvents.length - MAX_VISIBLE_EVENTS;
+        {weeks.map((week) => {
+          const segments = layoutWeek(week, events);
+          const visible = segments.filter((s) => s.lane < MAX_VISIBLE_LANES);
+          const hidden = segments.filter((s) => s.lane >= MAX_VISIBLE_LANES);
+          const numLanes = Math.min(
+            MAX_VISIBLE_LANES,
+            segments.reduce((max, s) => Math.max(max, s.lane + 1), 0),
+          );
 
-              return (
-                <div
-                  key={key}
-                  className={`flex min-h-[6.5rem] flex-col gap-0.5 border-b border-r border-gray-100 p-1.5 last:border-r-0 ${
-                    inMonth ? "bg-white" : "bg-gray-50"
-                  }`}
-                >
-                  <span
-                    className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                      isToday
-                        ? "bg-[#002D56] font-semibold text-white"
-                        : inMonth
-                          ? "text-gray-900"
-                          : "text-gray-400"
+          const overflowByCol = Array(7).fill(0);
+          for (const s of hidden) {
+            for (let c = s.startCol; c < s.startCol + s.span; c++) overflowByCol[c]++;
+          }
+          const hasOverflow = overflowByCol.some((n) => n > 0);
+          const totalRows = 1 + numLanes + (hasOverflow ? 1 : 0);
+          const weekKey = toDateKey(week[0]);
+
+          return (
+            <div
+              key={weekKey}
+              className="grid grid-cols-7 border-b border-gray-100 last:border-b-0"
+              style={{ gridAutoRows: "min-content" }}
+            >
+              {week.map((day, i) => {
+                const inMonth = day.getMonth() === month;
+                return (
+                  <div
+                    key={toDateKey(day)}
+                    style={{ gridColumn: i + 1, gridRow: `1 / span ${totalRows}`, minHeight: "5rem" }}
+                    className={`border-r border-gray-100 last:border-r-0 ${inMonth ? "bg-white" : "bg-gray-50"}`}
+                  />
+                );
+              })}
+
+              {week.map((day, i) => {
+                const key = toDateKey(day);
+                const inMonth = day.getMonth() === month;
+                const isToday = key === todayKey;
+                return (
+                  <div key={key} style={{ gridColumn: i + 1, gridRow: 1 }} className="p-1.5 pb-0.5">
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
+                        isToday
+                          ? "bg-[#002D56] font-semibold text-white"
+                          : inMonth
+                            ? "text-gray-900"
+                            : "text-gray-400"
+                      }`}
+                    >
+                      {day.getDate()}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {visible.map((seg) => {
+                const time = seg.span === 1 ? formatEventTime(seg.event) : null;
+                const bg = seg.event.colorId
+                  ? EVENT_COLORS[seg.event.colorId]
+                  : calendarColors?.[seg.event.calendarId];
+                return (
+                  <a
+                    key={`${seg.event.id}-${weekKey}`}
+                    href={seg.event.htmlLink ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={seg.event.title}
+                    style={{
+                      gridColumn: `${seg.startCol + 1} / span ${seg.span}`,
+                      gridRow: seg.lane + 2,
+                      backgroundColor: bg ? `${bg}26` : undefined,
+                    }}
+                    className={`mx-0.5 mt-0.5 truncate rounded px-1 py-0.5 text-[11px] text-[#002D56] hover:opacity-80 ${
+                      bg ? "" : "bg-[#002D56]/10"
                     }`}
                   >
-                    {day.getDate()}
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map((event) => {
-                      const time = formatEventTime(event);
-                      const bg = event.colorId
-                        ? EVENT_COLORS[event.colorId]
-                        : calendarColors?.[event.calendarId];
-                      return (
-                        <a
-                          key={`${event.id}-${key}`}
-                          href={event.htmlLink ?? undefined}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={event.title}
-                          style={bg ? { backgroundColor: `${bg}26` } : undefined}
-                          className={`truncate rounded px-1 py-0.5 text-[11px] text-[#002D56] hover:opacity-80 ${
-                            bg ? "" : "bg-[#002D56]/10"
-                          }`}
-                        >
-                          {time && <span className="mr-1 font-medium">{time}</span>}
-                          {event.title}
-                        </a>
-                      );
-                    })}
-                    {overflow > 0 && (
-                      <span className="px-1 text-[11px] text-gray-500">+{overflow}개 더보기</span>
-                    )}
-                  </div>
-                </div>
-              );
-            }),
-          )}
-        </div>
+                    {time && <span className="mr-1 font-medium">{time}</span>}
+                    {seg.event.title}
+                  </a>
+                );
+              })}
+
+              {hasOverflow &&
+                overflowByCol.map(
+                  (count, i) =>
+                    count > 0 && (
+                      <span
+                        key={`overflow-${weekKey}-${i}`}
+                        style={{ gridColumn: i + 1, gridRow: numLanes + 2 }}
+                        className="px-1.5 pb-1 text-[11px] text-gray-500"
+                      >
+                        +{count}개 더보기
+                      </span>
+                    ),
+                )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
