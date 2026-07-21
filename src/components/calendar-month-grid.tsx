@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { CalendarEvent } from "@/lib/google-calendar";
 import {
-  eventDateKey,
+  eventDateKeyRange,
   getMonthGrid,
   monthParam,
   shiftMonth,
@@ -10,6 +10,21 @@ import {
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 const MAX_VISIBLE_EVENTS = 3;
+
+// Google Calendar's fixed event color palette (Colors API "event" set, colorId 1–11).
+const EVENT_COLORS: Record<string, { bg: string; fg: string }> = {
+  "1": { bg: "#7986cb", fg: "#ffffff" },
+  "2": { bg: "#33b679", fg: "#ffffff" },
+  "3": { bg: "#8e24aa", fg: "#ffffff" },
+  "4": { bg: "#e67c73", fg: "#ffffff" },
+  "5": { bg: "#f6c026", fg: "#3c3c3c" },
+  "6": { bg: "#f5511d", fg: "#ffffff" },
+  "7": { bg: "#039be5", fg: "#ffffff" },
+  "8": { bg: "#616161", fg: "#ffffff" },
+  "9": { bg: "#3f51b5", fg: "#ffffff" },
+  "10": { bg: "#0b8043", fg: "#ffffff" },
+  "11": { bg: "#d60000", fg: "#ffffff" },
+};
 
 function formatEventTime(event: CalendarEvent) {
   if (event.allDay || !event.start) return null;
@@ -31,9 +46,10 @@ export default function CalendarMonthGrid({
   const eventsByDay = new Map<string, CalendarEvent[]>();
   for (const event of events) {
     if (!event.start) continue;
-    const key = eventDateKey(event.start);
-    if (!eventsByDay.has(key)) eventsByDay.set(key, []);
-    eventsByDay.get(key)!.push(event);
+    for (const key of eventDateKeyRange(event.start, event.end, event.allDay)) {
+      if (!eventsByDay.has(key)) eventsByDay.set(key, []);
+      eventsByDay.get(key)!.push(event);
+    }
   }
 
   const prev = shiftMonth(year, month, -1);
@@ -111,14 +127,22 @@ export default function CalendarMonthGrid({
                   <div className="flex flex-col gap-0.5">
                     {dayEvents.slice(0, MAX_VISIBLE_EVENTS).map((event) => {
                       const time = formatEventTime(event);
+                      const color = event.colorId ? EVENT_COLORS[event.colorId] : null;
                       return (
                         <a
-                          key={event.id}
+                          key={`${event.id}-${key}`}
                           href={event.htmlLink ?? undefined}
                           target="_blank"
                           rel="noopener noreferrer"
                           title={event.title}
-                          className="truncate rounded bg-[#002D56]/10 px-1 py-0.5 text-[11px] text-[#002D56] hover:bg-[#002D56]/20"
+                          style={
+                            color
+                              ? { backgroundColor: `${color.bg}26`, color: color.bg }
+                              : undefined
+                          }
+                          className={`truncate rounded px-1 py-0.5 text-[11px] hover:opacity-80 ${
+                            color ? "" : "bg-[#002D56]/10 text-[#002D56]"
+                          }`}
                         >
                           {time && <span className="mr-1 font-medium">{time}</span>}
                           {event.title}

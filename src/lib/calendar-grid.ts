@@ -12,6 +12,29 @@ export function eventDateKey(isoOrDate: string) {
   return toDateKey(new Date(isoOrDate));
 }
 
+/**
+ * All local-date keys an event spans, inclusive. Google Calendar's `end` for
+ * all-day events is exclusive (a 3-day event has end.date = day after the
+ * last day), so that case drops the last day; timed events keep both ends.
+ */
+export function eventDateKeyRange(start: string, end: string | null, allDay: boolean): string[] {
+  const startKey = eventDateKey(start);
+  if (!end) return [startKey];
+
+  const startDate = new Date(`${startKey}T00:00:00`);
+  const endKey = eventDateKey(end);
+  const endDate = new Date(`${endKey}T00:00:00`);
+  if (allDay) endDate.setDate(endDate.getDate() - 1);
+
+  if (endDate <= startDate) return [startKey];
+
+  const keys: string[] = [];
+  for (const d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    keys.push(toDateKey(d));
+  }
+  return keys;
+}
+
 export function parseMonthParam(param: string | undefined) {
   const today = new Date();
   if (param && /^\d{4}-\d{2}$/.test(param)) {

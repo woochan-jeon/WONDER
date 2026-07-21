@@ -112,6 +112,7 @@ export type CalendarEvent = {
   end: string | null;
   allDay: boolean;
   htmlLink: string | null;
+  colorId: string | null;
 };
 
 export async function getConnectionStatus() {
@@ -221,5 +222,6 @@ export async function listEventsInRange(timeMin: Date, timeMax: Date): Promise<C
     end: event.end?.dateTime ?? event.end?.date ?? null,
     allDay: !event.start?.dateTime,
     htmlLink: event.htmlLink ?? null,
+    colorId: event.colorId ?? null,
   }));
 }
