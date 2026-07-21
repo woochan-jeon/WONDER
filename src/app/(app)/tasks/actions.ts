@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
 import { TaskStatus } from "@/generated/prisma/enums";
 
 export type ActionState = { error?: string };
@@ -11,7 +10,10 @@ export type ActionState = { error?: string };
 const createTaskSchema = z.object({
   title: z.string().trim().min(1, "제목을 입력해 주세요").max(200),
   description: z.string().trim().max(2000).optional(),
-  assigneeIds: z.array(z.string().trim().min(1)).default([]),
+  assigneeNames: z
+    .array(z.string())
+    .default([])
+    .transform((names) => [...new Set(names.map((n) => n.trim()).filter(Boolean))]),
   categoryId: z.string().trim().optional(),
   dueDate: z.string().trim().optional(),
 });
@@ -20,28 +22,25 @@ export async function createTaskAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const user = await requireUser();
-
   const parsed = createTaskSchema.safeParse({
     title: formData.get("title"),
     description: formData.get("description") || undefined,
-    assigneeIds: formData.getAll("assigneeIds"),
+    assigneeNames: formData.getAll("assigneeNames"),
     categoryId: formData.get("categoryId") || undefined,
     dueDate: formData.get("dueDate") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
   }
-  const { title, description, assigneeIds, categoryId, dueDate } = parsed.data;
+  const { title, description, assigneeNames, categoryId, dueDate } = parsed.data;
 
   await prisma.task.create({
     data: {
       title,
       description: description || null,
       dueDate: dueDate ? new Date(dueDate) : null,
-      assignees: { connect: assigneeIds.map((id) => ({ id })) },
+      assigneeNames: JSON.stringify(assigneeNames),
       categoryId: categoryId || null,
-      createdById: user.id,
     },
   });
 
@@ -53,7 +52,10 @@ const editTaskSchema = z.object({
   taskId: z.string().min(1),
   title: z.string().trim().min(1, "제목을 입력해 주세요").max(200),
   description: z.string().trim().max(2000).optional(),
-  assigneeIds: z.array(z.string().trim().min(1)).default([]),
+  assigneeNames: z
+    .array(z.string())
+    .default([])
+    .transform((names) => [...new Set(names.map((n) => n.trim()).filter(Boolean))]),
   categoryId: z.string().trim().optional(),
   dueDate: z.string().trim().optional(),
 });
@@ -62,20 +64,18 @@ export async function updateTaskAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireUser();
-
   const parsed = editTaskSchema.safeParse({
     taskId: formData.get("taskId"),
     title: formData.get("title"),
     description: formData.get("description") || undefined,
-    assigneeIds: formData.getAll("assigneeIds"),
+    assigneeNames: formData.getAll("assigneeNames"),
     categoryId: formData.get("categoryId") || undefined,
     dueDate: formData.get("dueDate") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
   }
-  const { taskId, title, description, assigneeIds, categoryId, dueDate } = parsed.data;
+  const { taskId, title, description, assigneeNames, categoryId, dueDate } = parsed.data;
 
   await prisma.task.update({
     where: { id: taskId },
@@ -83,7 +83,7 @@ export async function updateTaskAction(
       title,
       description: description || null,
       dueDate: dueDate ? new Date(dueDate) : null,
-      assignees: { set: assigneeIds.map((id) => ({ id })) },
+      assigneeNames: JSON.stringify(assigneeNames),
       categoryId: categoryId || null,
     },
   });
@@ -93,7 +93,6 @@ export async function updateTaskAction(
 }
 
 export async function setTaskStatusAction(taskId: string, status: string) {
-  await requireUser();
   if (!Object.values(TaskStatus).includes(status as TaskStatus)) {
     throw new Error("Invalid status");
   }
@@ -105,7 +104,6 @@ export async function setTaskStatusAction(taskId: string, status: string) {
 }
 
 export async function deleteTaskAction(taskId: string) {
-  await requireUser();
   await prisma.task.delete({ where: { id: taskId } });
   revalidatePath("/tasks");
 }
@@ -122,8 +120,6 @@ export async function createCategoryAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireUser();
-
   const parsed = createCategorySchema.safeParse({
     name: formData.get("name"),
     color: formData.get("color"),
@@ -145,7 +141,6 @@ export async function createCategoryAction(
 }
 
 export async function deleteCategoryAction(categoryId: string) {
-  await requireUser();
   await prisma.category.delete({ where: { id: categoryId } });
   revalidatePath("/tasks");
 }

@@ -1,11 +1,9 @@
 import ChannelHeader from "@/components/channel-header";
-import { getCurrentUser } from "@/lib/auth";
 import { getConnectionStatus, isGoogleOAuthConfigured } from "@/lib/google-calendar";
 import { DriveScopeError, getEmbedUrl, getMeetingMinutesDoc, type DriveItem } from "@/lib/google-drive";
 
 export default async function MinutesPage() {
-  const [user, status] = await Promise.all([getCurrentUser(), getConnectionStatus()]);
-  const isAdmin = user?.role === "ADMIN";
+  const status = await getConnectionStatus();
   const oauthConfigured = isGoogleOAuthConfigured();
 
   let doc: DriveItem | null = null;
@@ -49,7 +47,7 @@ export default async function MinutesPage() {
             <p className="text-xs text-gray-400">
               캘린더 채널과 같은 구글 계정 연결을 사용합니다. 캘린더 채널에서 먼저 연결해 주세요.
             </p>
-            {isAdmin && oauthConfigured && (
+            {oauthConfigured && (
               <a
                 href="/api/calendar/oauth/start"
                 className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
@@ -62,14 +60,12 @@ export default async function MinutesPage() {
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 p-10 text-center">
             <p className="text-sm text-gray-600">연결된 구글 계정에 드라이브 접근 권한이 없습니다.</p>
             <p className="text-xs text-gray-400">드라이브 채널에서 계정을 다시 연결해 주세요.</p>
-            {isAdmin && (
-              <a
-                href="/api/calendar/oauth/start"
-                className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
-              >
-                구글 계정 다시 연결하기
-              </a>
-            )}
+            <a
+              href="/api/calendar/oauth/start"
+              className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
+            >
+              구글 계정 다시 연결하기
+            </a>
           </div>
         ) : !doc ? (
           <p className="rounded-md border border-dashed border-gray-200 p-10 text-center text-sm text-gray-500">

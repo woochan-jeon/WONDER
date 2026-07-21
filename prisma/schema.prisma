@@ -12,28 +12,10 @@ datasource db {
   provider = "postgresql"
 }
 
-enum Role {
-  ADMIN
-  MEMBER
-}
-
 enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
-}
-
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         Role     @default(MEMBER)
-  createdAt    DateTime @default(now())
-
-  createdTasks    Task[]                 @relation("CreatedTasks")
-  assignedTasks   Task[]                 @relation("AssignedTasks")
-  calendarConnection CalendarConnection? @relation("ConnectedBy")
 }
 
 model Task {
@@ -45,10 +27,9 @@ model Task {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  createdById String
-  createdBy   User   @relation("CreatedTasks", fields: [createdById], references: [id])
-
-  assignees User[] @relation("AssignedTasks")
+  // JSON-encoded string[] of freeform team-member names — the workspace has
+  // no accounts, so assignees are just names, not linked records.
+  assigneeNames String @default("[]")
 
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -76,9 +57,6 @@ model CalendarConnection {
   refreshToken String
   expiryDate   DateTime
   updatedAt    DateTime @updatedAt
-
-  connectedById String @unique
-  connectedBy   User   @relation("ConnectedBy", fields: [connectedById], references: [id])
 }
 
 // Curated agenda/decision summaries for the # 회의 아카이브 channel, sourced from

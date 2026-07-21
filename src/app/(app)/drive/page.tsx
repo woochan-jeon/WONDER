@@ -1,6 +1,5 @@
 import ChannelHeader from "@/components/channel-header";
 import DriveBrowser from "@/components/drive-browser";
-import { getCurrentUser } from "@/lib/auth";
 import { getConnectionStatus, isGoogleOAuthConfigured } from "@/lib/google-calendar";
 import {
   DriveScopeError,
@@ -18,10 +17,9 @@ export default async function DrivePage({
   searchParams: Promise<{ folder?: string; q?: string; pickRoot?: string }>;
 }) {
   const params = await searchParams;
-  const [user, status] = await Promise.all([getCurrentUser(), getConnectionStatus()]);
-  const isAdmin = user?.role === "ADMIN";
+  const status = await getConnectionStatus();
   const oauthConfigured = isGoogleOAuthConfigured();
-  const pickingRoot = params.pickRoot === "1" && isAdmin;
+  const pickingRoot = params.pickRoot === "1";
   const query = params.q?.trim();
 
   let items: DriveItem[] = [];
@@ -84,7 +82,7 @@ export default async function DrivePage({
             <p className="text-xs text-gray-400">
               캘린더 채널과 같은 구글 계정 연결을 사용합니다. 캘린더 채널에서 먼저 연결해 주세요.
             </p>
-            {isAdmin && oauthConfigured && (
+            {oauthConfigured && (
               <a
                 href="/api/calendar/oauth/start"
                 className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
@@ -100,14 +98,12 @@ export default async function DrivePage({
               캘린더 연동을 먼저 설정했던 계정이라면, 드라이브 권한이 추가되기 전에 연결된 것일 수 있어요.
               재연결하면 드라이브 접근 동의가 함께 요청됩니다.
             </p>
-            {isAdmin && (
-              <a
-                href="/api/calendar/oauth/start"
-                className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
-              >
-                구글 계정 다시 연결하기
-              </a>
-            )}
+            <a
+              href="/api/calendar/oauth/start"
+              className="mt-2 rounded-md bg-[#002D56] px-4 py-2 text-sm font-medium text-white hover:bg-[#00203C]"
+            >
+              구글 계정 다시 연결하기
+            </a>
           </div>
         ) : (
           <>
@@ -118,7 +114,6 @@ export default async function DrivePage({
               items={items}
               breadcrumb={breadcrumb}
               rootFolder={rootFolder}
-              isAdmin={isAdmin}
               searchQuery={query}
               pickingRoot={pickingRoot}
             />

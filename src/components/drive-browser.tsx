@@ -28,14 +28,12 @@ export default function DriveBrowser({
   items,
   breadcrumb,
   rootFolder,
-  isAdmin,
   searchQuery,
   pickingRoot,
 }: {
   items: DriveItem[];
   breadcrumb: BreadcrumbItem[];
   rootFolder: DriveRootFolder;
-  isAdmin: boolean;
   searchQuery?: string;
   pickingRoot: boolean;
 }) {
@@ -135,20 +133,18 @@ export default function DriveBrowser({
         )}
 
         <div className="flex items-center gap-3">
-          {isAdmin && (
-            <div className="flex items-center gap-2 text-xs">
-              <Link href="/drive?pickRoot=1" className="text-[#002D56] hover:underline">
-                루트 폴더 변경
-              </Link>
-              {rootFolder && (
-                <form action={clearDriveRootFolderAction}>
-                  <button type="submit" className="text-gray-400 hover:text-red-600">
-                    초기화
-                  </button>
-                </form>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-xs">
+            <Link href="/drive?pickRoot=1" className="text-[#002D56] hover:underline">
+              루트 폴더 변경
+            </Link>
+            {rootFolder && (
+              <form action={clearDriveRootFolderAction}>
+                <button type="submit" className="text-gray-400 hover:text-red-600">
+                  초기화
+                </button>
+              </form>
+            )}
+          </div>
           <form action="/drive" method="get" className="flex items-center gap-2">
             <input
               type="search"

@@ -8,7 +8,9 @@ Slack 스타일 UI의 팀 업무관리 워크스페이스. 현재 다섯 개의 
 - **# 회의록** — 드라이브의 "00. 회의록" 문서를 그대로 임베드해서 보여주는 채널
 - **# 회의 아카이브** — Meet Recordings의 Gemini 회의록을 안건·결정사항으로 자동 요약하는 채널
 
-기술 스택: Next.js 16 (App Router) · TypeScript · Tailwind CSS · Prisma 7 + Postgres (Vercel Postgres/Neon) · 자체 세션 인증(JWT 쿠키) · Google Calendar API
+기술 스택: Next.js 16 (App Router) · TypeScript · Tailwind CSS · Prisma 7 + Postgres (Vercel Postgres/Neon) · Google Calendar API
+
+계정/로그인이 없는 완전 공개 워크스페이스입니다 — 링크만 있으면 누구나 모든 채널에 접속할 수 있습니다.
 
 ## 1. 처음 실행하기
 
@@ -34,19 +36,12 @@ cp .env.example .env
 | 변수 | 설명 |
 | --- | --- |
 | `DATABASE_URL` | Postgres 연결 문자열. Vercel Postgres(Neon)를 쓰면 Storage 탭에서 자동으로 채워집니다. |
-| `AUTH_SECRET` | 로그인 세션 쿠키 서명에 쓰는 랜덤 비밀값. 아래 명령으로 생성해 채워주세요. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | 구글 캘린더 연동용 OAuth 클라이언트 정보. 3단계 참고. |
 | `ANTHROPIC_API_KEY` | (선택) # 회의 아카이브 채널의 자동 요약에 사용. 미설정 시 새 회의록이 자동으로 추가되지 않을 뿐, 나머지 기능은 그대로 동작합니다. [console.anthropic.com](https://console.anthropic.com/settings/keys)에서 발급. |
 
-`AUTH_SECRET` 생성:
+## 3. Google Calendar 연동 설정 (한 번만 하면 됨)
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-## 3. Google Calendar 연동 설정 (관리자 1회만)
-
-팀 캘린더 채널은 **관리자 계정 한 명**이 자신의 구글 캘린더를 연결하면, 팀원 전체가 그 일정을 볼 수 있는 구조입니다. 연동하려면 Google Cloud Console에서 OAuth 클라이언트를 직접 발급받아야 합니다.
+팀 캘린더 채널은 누군가 한 번 자신의 구글 캘린더를 연결하면, 그 이후로는 링크에 접속하는 모두가 그 일정을 볼 수 있는 구조입니다. 연동하려면 Google Cloud Console에서 OAuth 클라이언트를 직접 발급받아야 합니다.
 
 1. [Google Cloud Console](https://console.cloud.google.com/)에 접속해 새 프로젝트를 만들거나 기존 프로젝트를 선택합니다.
 2. 좌측 메뉴 **APIs & Services → Library**에서 `Google Calendar API`를 검색해 **Enable(사용 설정)** 합니다.
@@ -60,10 +55,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
      - 로컬 개발: `http://localhost:3000/api/calendar/oauth/callback`
      - 배포 후에는 실제 도메인으로 동일한 경로를 추가로 등록 (예: `https://your-domain.com/api/calendar/oauth/callback`)
 5. 생성된 **Client ID**와 **Client Secret**을 `.env`의 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`에 붙여넣습니다. `GOOGLE_REDIRECT_URI`는 4번에서 등록한 콜백 주소와 **완전히 동일하게** 맞춰주세요.
-6. 서버를 재시작한 뒤, 관리자 계정으로 로그인 → **# 캘린더** 채널 → **구글 캘린더 연결** 버튼을 클릭해 구글 로그인 동의 화면에서 권한을 승인합니다.
-7. 이후부터는 팀원 누구나 로그인하면 관리자가 연결한 캘린더의 예정된 일정(앞으로 30일)을 조회할 수 있습니다. 조회만 가능하며(읽기 전용 권한), 이 앱에서 일정을 생성/수정하지는 않습니다.
+6. 서버를 재시작한 뒤, **# 캘린더** 채널 → **구글 캘린더 연결** 버튼을 클릭해 구글 로그인 동의 화면에서 권한을 승인합니다.
+7. 이후부터는 링크에 접속하는 누구나 연결된 캘린더의 예정된 일정을 조회할 수 있습니다. 조회만 가능하며(읽기 전용 권한), 이 앱에서 일정을 생성/수정하지는 않습니다.
 
-> 연결을 끊고 싶다면 캘린더 채널 상단의 **연결 해제** 버튼을 사용하세요. 관리자만 연결/해제할 수 있습니다.
+> 연결을 끊고 싶다면 캘린더 채널 상단의 **연결 해제** 버튼을 사용하세요. 로그인이 없으므로 접속하는 누구나 연결/해제할 수 있습니다.
 
 ## 4. 회의 아카이브 자동 요약
 
@@ -74,19 +69,16 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 - 요약 1건당 Claude API 비용이 소량 발생합니다.
 - 요약 로직은 `src/lib/meeting-summarizer.ts`(Claude 호출), `src/lib/meeting-archive-sync.ts`(신규 문서 감지·저장)에 있습니다.
 
-## 5. 회원가입 / 로그인
+## 5. 할일 담당자
 
-- `/signup`에서 이름, 이메일, 비밀번호만 입력하면 누구나 가입할 수 있습니다 (초대 코드 없음).
-- 가장 먼저 가입한 사람이 자동으로 관리자 권한을 가집니다. 이후 가입자는 일반 팀원(member)입니다.
-- 로그인 세션은 30일간 유지되는 httpOnly 쿠키로 관리됩니다.
+계정이 없기 때문에 할일 담당자는 실제 로그인 계정이 아니라 그냥 이름 문자열입니다. 담당자 선택 UI에는 `src/components/task-board.tsx`의 `TEAM_MEMBERS` 상수에 있는 이름들이 기본으로 뜨고, 그 외 이름은 직접 입력할 수 있습니다. 팀원 명단이 바뀌면 이 상수만 수정하면 됩니다.
 
 ## 6. 프로젝트 구조
 
 ```
 src/
   app/
-    (auth)/          로그인, 회원가입 페이지 및 서버 액션
-    (app)/            로그인 후 워크스페이스 (사이드바 레이아웃)
+    (app)/            워크스페이스 (사이드바 레이아웃) — 로그인 없이 바로 접근
       tasks/          # 할일 채널
       calendar/       # 캘린더 채널
       drive/          # 드라이브 채널
@@ -94,8 +86,8 @@ src/
       archive/        # 회의 아카이브 채널
     api/calendar/     구글 OAuth 콜백 라우트
   components/          Sidebar, 채널 헤더, 할일 보드, 캘린더 아젠다 등 UI
-  lib/                 인증, Prisma 클라이언트, 구글 캘린더/드라이브 연동, 회의 요약 로직
-prisma/schema.prisma   DB 스키마 (User, Task, CalendarConnection, MeetingSummary 등)
+  lib/                 Prisma 클라이언트, 구글 캘린더/드라이브 연동, 회의 요약 로직
+prisma/schema.prisma   DB 스키마 (Task, Category, CalendarConnection, MeetingSummary 등)
 ```
 
 ## 7. 자주 쓰는 명령어

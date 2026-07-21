@@ -49,7 +49,7 @@ export function getGoogleAuthUrl() {
   });
 }
 
-export async function saveConnectionFromCode(code: string, connectedById: string) {
+export async function saveConnectionFromCode(code: string) {
   const client = getOAuth2Client();
   const { tokens } = await client.getToken(code);
   if (!tokens.access_token || !tokens.refresh_token || !tokens.expiry_date) {
@@ -70,7 +70,6 @@ export async function saveConnectionFromCode(code: string, connectedById: string
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiryDate: new Date(tokens.expiry_date),
-      connectedById,
     },
   });
 }
@@ -132,14 +131,11 @@ export type CalendarEvent = {
 };
 
 export async function getConnectionStatus() {
-  const connection = await prisma.calendarConnection.findFirst({
-    include: { connectedBy: { select: { name: true } } },
-  });
+  const connection = await prisma.calendarConnection.findFirst();
   return connection
     ? {
         connected: true as const,
         googleEmail: connection.googleEmail,
-        connectedByName: connection.connectedBy.name,
         calendarIds: parseCalendarIds(connection.calendarIds),
       }
     : { connected: false as const };

@@ -2,9 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { logoutAction } from "@/app/(auth)/actions";
-
-type SidebarUser = { name: string; email: string; role: string };
 
 const CHANNELS = [
   { href: "/tasks", label: "할일", icon: "✅" },
@@ -14,7 +11,7 @@ const CHANNELS = [
   { href: "/archive", label: "회의 아카이브", icon: "🗄️" },
 ];
 
-export default function Sidebar({ user }: { user: SidebarUser }) {
+export default function Sidebar() {
   const pathname = usePathname();
 
   return (
@@ -54,26 +51,6 @@ export default function Sidebar({ user }: { user: SidebarUser }) {
           })}
         </ul>
       </nav>
-
-      <div className="border-t border-white/10 px-3 py-3">
-        <div className="mb-2 flex items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#8D7150] text-xs font-semibold">
-            {user.name.slice(0, 1).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{user.name}</p>
-            <p className="truncate text-xs text-white/50">{user.email}</p>
-          </div>
-        </div>
-        <form action={logoutAction}>
-          <button
-            type="submit"
-            className="w-full rounded-md px-2 py-1.5 text-left text-sm text-white/70 hover:bg-white/10"
-          >
-            로그아웃
-          </button>
-        </form>
-      </div>
     </aside>
   );
 }

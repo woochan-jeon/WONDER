@@ -11,7 +11,10 @@ import {
   type ActionState,
 } from "@/app/(app)/tasks/actions";
 
-type TeamUser = { id: string; name: string };
+// No accounts in this workspace — assignees are just names, picked from the
+// team roster below or typed in freely.
+const TEAM_MEMBERS = ["서윤", "태희", "지윤", "우찬", "현아", "혜솔", "서진"];
+
 type Category = { id: string; name: string; color: string };
 
 type Task = {
@@ -20,8 +23,7 @@ type Task = {
   description: string | null;
   status: "TODO" | "IN_PROGRESS" | "DONE";
   dueDate: Date | null;
-  assignees: TeamUser[];
-  createdBy: TeamUser;
+  assignees: string[];
   category: Category | null;
 };
 
@@ -87,46 +89,39 @@ function CategorySelect({
   );
 }
 
-function AssigneePicker({
-  users,
-  defaultSelectedIds,
-}: {
-  users: TeamUser[];
-  defaultSelectedIds?: string[];
-}) {
-  if (users.length === 0) {
-    return <span className="text-xs text-gray-500">등록된 팀원이 없습니다</span>;
-  }
+function AssigneePicker({ defaultSelected }: { defaultSelected?: string[] }) {
+  const [extra, setExtra] = useState("");
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {users.map((u) => (
-        <label
-          key={u.id}
-          className="flex items-center gap-1.5 rounded-full border border-gray-300 px-2 py-1 text-xs text-gray-900 has-[:checked]:border-[#002D56] has-[:checked]:bg-[#002D56]/10 has-[:checked]:text-[#002D56]"
-        >
-          <input
-            type="checkbox"
-            name="assigneeIds"
-            value={u.id}
-            defaultChecked={defaultSelectedIds?.includes(u.id)}
-            className="h-3 w-3 accent-[#002D56]"
-          />
-          {u.name}
-        </label>
-      ))}
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1.5">
+        {TEAM_MEMBERS.map((name) => (
+          <label
+            key={name}
+            className="flex items-center gap-1.5 rounded-full border border-gray-300 px-2 py-1 text-xs text-gray-900 has-[:checked]:border-[#002D56] has-[:checked]:bg-[#002D56]/10 has-[:checked]:text-[#002D56]"
+          >
+            <input
+              type="checkbox"
+              name="assigneeNames"
+              value={name}
+              defaultChecked={defaultSelected?.includes(name)}
+              className="h-3 w-3 accent-[#002D56]"
+            />
+            {name}
+          </label>
+        ))}
+      </div>
+      <input
+        name="assigneeNames"
+        value={extra}
+        onChange={(e) => setExtra(e.target.value)}
+        placeholder="그 외 담당자 이름 (직접 입력)"
+        className="w-56 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-900 outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
+      />
     </div>
   );
 }
 
-export default function TaskBoard({
-  tasks,
-  users,
-  categories,
-}: {
-  tasks: Task[];
-  users: TeamUser[];
-  categories: Category[];
-}) {
+export default function TaskBoard({ tasks, categories }: { tasks: Task[]; categories: Category[] }) {
   const [showNewForm, setShowNewForm] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -200,9 +195,7 @@ export default function TaskBoard({
 
       {showCategoryForm && <NewCategoryForm onDone={() => setShowCategoryForm(false)} />}
 
-      {showNewForm && (
-        <NewTaskForm users={users} categories={categories} onDone={() => setShowNewForm(false)} />
-      )}
+      {showNewForm && <NewTaskForm categories={categories} onDone={() => setShowNewForm(false)} />}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {STATUS_COLUMNS.map((col) => (
@@ -219,7 +212,7 @@ export default function TaskBoard({
               {visibleTasks
                 .filter((t) => t.status === col.status)
                 .map((task) => (
-                  <TaskCard key={task.id} task={task} users={users} categories={categories} />
+                  <TaskCard key={task.id} task={task} categories={categories} />
                 ))}
               {visibleTasks.filter((t) => t.status === col.status).length === 0 && (
                 <p className="rounded-md border border-dashed border-gray-200 p-4 text-center text-xs text-gray-900">
@@ -280,15 +273,7 @@ function NewCategoryForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function NewTaskForm({
-  users,
-  categories,
-  onDone,
-}: {
-  users: TeamUser[];
-  categories: Category[];
-  onDone: () => void;
-}) {
+function NewTaskForm({ categories, onDone }: { categories: Category[]; onDone: () => void }) {
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
     const result = await createTaskAction(prev, formData);
     if (!result.error) onDone();
@@ -315,7 +300,7 @@ function NewTaskForm({
       />
       <div>
         <p className="mb-1 text-xs text-gray-500">담당자 (여러 명 선택 가능)</p>
-        <AssigneePicker users={users} />
+        <AssigneePicker />
       </div>
       <div className="flex flex-wrap gap-3">
         <CategorySelect
@@ -349,28 +334,13 @@ function NewTaskForm({
   );
 }
 
-function TaskCard({
-  task,
-  users,
-  categories,
-}: {
-  task: Task;
-  users: TeamUser[];
-  categories: Category[];
-}) {
+function TaskCard({ task, categories }: { task: Task; categories: Category[] }) {
   const [editing, setEditing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const dueLabel = formatDueDate(task.dueDate);
 
   if (editing) {
-    return (
-      <EditTaskForm
-        task={task}
-        users={users}
-        categories={categories}
-        onDone={() => setEditing(false)}
-      />
-    );
+    return <EditTaskForm task={task} categories={categories} onDone={() => setEditing(false)} />;
   }
 
   return (
@@ -406,15 +376,15 @@ function TaskCard({
       <div className="flex items-center justify-between gap-2 pt-1">
         <div className="flex flex-wrap items-center gap-1.5">
           {task.assignees.length > 0 ? (
-            task.assignees.map((a) => (
+            task.assignees.map((name) => (
               <span
-                key={a.id}
+                key={name}
                 className="flex items-center gap-1 rounded-full bg-[#002D56]/10 px-2 py-0.5 text-xs text-[#002D56]"
               >
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#002D56] text-[9px] font-semibold text-white">
-                  {a.name.slice(0, 1).toUpperCase()}
+                  {name.slice(0, 1).toUpperCase()}
                 </span>
-                {a.name}
+                {name}
               </span>
             ))
           ) : (
@@ -442,12 +412,10 @@ function TaskCard({
 
 function EditTaskForm({
   task,
-  users,
   categories,
   onDone,
 }: {
   task: Task;
-  users: TeamUser[];
   categories: Category[];
   onDone: () => void;
 }) {
@@ -477,7 +445,7 @@ function EditTaskForm({
       />
       <div>
         <p className="mb-1 text-xs text-gray-500">담당자 (여러 명 선택 가능)</p>
-        <AssigneePicker users={users} defaultSelectedIds={task.assignees.map((a) => a.id)} />
+        <AssigneePicker defaultSelected={task.assignees} />
       </div>
       <div className="flex flex-wrap gap-2">
         <CategorySelect
