@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { createEvent, setCalendarId } from "@/lib/google-calendar";
+import { createEvent, setCalendarIds } from "@/lib/google-calendar";
 
 export type ActionState = { error?: string };
 
@@ -17,16 +17,13 @@ export async function disconnectCalendarAction() {
   revalidatePath("/calendar");
 }
 
-export async function selectCalendarAction(formData: FormData) {
+export async function selectCalendarsAction(formData: FormData) {
   const user = await requireUser();
   if (user.role !== "ADMIN") {
     throw new Error("관리자만 캘린더를 변경할 수 있습니다");
   }
-  const calendarId = formData.get("calendarId");
-  if (typeof calendarId !== "string" || !calendarId) {
-    throw new Error("캘린더를 선택해 주세요");
-  }
-  await setCalendarId(calendarId);
+  const calendarIds = formData.getAll("calendarIds").filter((v): v is string => typeof v === "string");
+  await setCalendarIds(calendarIds);
   revalidatePath("/calendar");
 }
 

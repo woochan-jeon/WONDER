@@ -102,7 +102,22 @@ export async function getAuthorizedClient() {
     }
   }
 
-  return { client, calendarId: connection.calendarId, googleEmail: connection.googleEmail };
+  return {
+    client,
+    calendarIds: parseCalendarIds(connection.calendarIds),
+    googleEmail: connection.googleEmail,
+  };
+}
+
+function parseCalendarIds(json: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) && parsed.every((v) => typeof v === "string") && parsed.length > 0
+      ? parsed
+      : ["primary"];
+  } catch {
+    return ["primary"];
+  }
 }
 
 export type CalendarEvent = {
@@ -113,6 +128,7 @@ export type CalendarEvent = {
   allDay: boolean;
   htmlLink: string | null;
   colorId: string | null;
+  calendarId: string;
 };
 
 export async function getConnectionStatus() {
@@ -124,7 +140,7 @@ export async function getConnectionStatus() {
         connected: true as const,
         googleEmail: connection.googleEmail,
         connectedByName: connection.connectedBy.name,
-        calendarId: connection.calendarId,
+        calendarIds: parseCalendarIds(connection.calendarIds),
       }
     : { connected: false as const };
 }
@@ -152,26 +168,33 @@ export async function listCalendars(): Promise<CalendarListItem[]> {
     }));
 }
 
-/** Hex background color of the connected calendar itself, used as the default for events with no per-event color override. */
-export async function getCalendarColor(): Promise<string | null> {
+/** Hex background color of each selected calendar, keyed by calendar ID — used as the default for events with no per-event color override. */
+export async function getCalendarColors(): Promise<Record<string, string>> {
   const authorized = await getAuthorizedClient();
-  if (!authorized) return null;
+  if (!authorized) return {};
 
   const calendar = google.calendar({ version: "v3", auth: authorized.client });
-  const entry = await calendar.calendarList
-    .get({ calendarId: authorized.calendarId })
+  const data = await calendar.calendarList
+    .list({ maxResults: 250 })
     .then((res) => res.data)
-    .catch(() => null);
+    .catch(() => ({ items: [] }));
 
-  return entry?.backgroundColor ?? null;
+  const colors: Record<string, string> = {};
+  for (const item of data.items ?? []) {
+    if (item.id && item.backgroundColor && authorized.calendarIds.includes(item.id)) {
+      colors[item.id] = item.backgroundColor;
+    }
+  }
+  return colors;
 }
 
-export async function setCalendarId(calendarId: string) {
+export async function setCalendarIds(calendarIds: string[]) {
   const connection = await prisma.calendarConnection.findFirst();
   if (!connection) throw new Error("연결된 캘린더가 없습니다");
+  if (calendarIds.length === 0) throw new Error("캘린더를 하나 이상 선택해 주세요");
   await prisma.calendarConnection.update({
     where: { id: connection.id },
-    data: { calendarId },
+    data: { calendarIds: JSON.stringify(calendarIds) },
   });
 }
 
@@ -203,7 +226,7 @@ export async function createEvent(input: {
       };
 
   await calendar.events.insert({
-    calendarId: authorized.calendarId,
+    calendarId: authorized.calendarIds[0],
     requestBody,
   });
 }
@@ -220,22 +243,35 @@ export async function listEventsInRange(timeMin: Date, timeMax: Date): Promise<C
 
   const calendar = google.calendar({ version: "v3", auth: authorized.client });
 
-  const { data } = await calendar.events.list({
-    calendarId: authorized.calendarId,
-    timeMin: timeMin.toISOString(),
-    timeMax: timeMax.toISOString(),
-    singleEvents: true,
-    orderBy: "startTime",
-    maxResults: 250,
-  });
+  const perCalendar = await Promise.all(
+    authorized.calendarIds.map((calendarId) =>
+      calendar.events
+        .list({
+          calendarId,
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 250,
+        })
+        .then((res) =>
+          (res.data.items ?? []).map(
+            (event): CalendarEvent => ({
+              id: event.id ?? crypto.randomUUID(),
+              title: event.summary ?? "(제목 없음)",
+              start: event.start?.dateTime ?? event.start?.date ?? null,
+              end: event.end?.dateTime ?? event.end?.date ?? null,
+              allDay: !event.start?.dateTime,
+              htmlLink: event.htmlLink ?? null,
+              colorId: event.colorId ?? null,
+              calendarId,
+            }),
+          ),
+        )
+        // A calendar the account no longer has access to shouldn't break the rest.
+        .catch(() => [] as CalendarEvent[]),
+    ),
+  );
 
-  return (data.items ?? []).map((event) => ({
-    id: event.id ?? crypto.randomUUID(),
-    title: event.summary ?? "(제목 없음)",
-    start: event.start?.dateTime ?? event.start?.date ?? null,
-    end: event.end?.dateTime ?? event.end?.date ?? null,
-    allDay: !event.start?.dateTime,
-    htmlLink: event.htmlLink ?? null,
-    colorId: event.colorId ?? null,
-  }));
+  return perCalendar.flat();
 }

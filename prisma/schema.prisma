@@ -67,7 +67,8 @@ model Category {
 model CalendarConnection {
   id           String   @id @default(cuid())
   googleEmail  String
-  calendarId   String   @default("primary")
+  // JSON-encoded string[] of calendar IDs shown together in # 캘린더.
+  calendarIds  String   @default("[\"primary\"]")
   // Drive folder the # 드라이브 channel is scoped to. Null means "My Drive" root.
   driveRootFolderId   String?
   driveRootFolderName String?

@@ -3,7 +3,7 @@ import CalendarMonthGrid from "@/components/calendar-month-grid";
 import { CalendarPicker, NewEventButton } from "@/components/calendar-toolbar";
 import { getCurrentUser } from "@/lib/auth";
 import {
-  getCalendarColor,
+  getCalendarColors,
   getConnectionStatus,
   isGoogleOAuthConfigured,
   listCalendars,
@@ -36,10 +36,10 @@ export default async function CalendarPage({
   const gridEndExclusive = new Date(gridEnd);
   gridEndExclusive.setDate(gridEndExclusive.getDate() + 1);
 
-  const [events, calendars, defaultColor] = await Promise.all([
+  const [events, calendars, calendarColors] = await Promise.all([
     status.connected ? listEventsInRange(gridStart, gridEndExclusive) : Promise.resolve([]),
     status.connected && isAdmin ? listCalendars() : Promise.resolve([]),
-    status.connected ? getCalendarColor() : Promise.resolve(null),
+    status.connected ? getCalendarColors() : Promise.resolve({}),
   ]);
 
   return (
@@ -101,12 +101,12 @@ export default async function CalendarPage({
               <p className="text-xs text-gray-400">
                 {status.googleEmail} 계정으로 연결됨 · {status.connectedByName}님이 연결
               </p>
-              {isAdmin && <CalendarPicker calendars={calendars} currentCalendarId={status.calendarId} />}
+              {isAdmin && <CalendarPicker calendars={calendars} currentCalendarIds={status.calendarIds} />}
             </div>
             <div className="mb-4">
               <NewEventButton />
             </div>
-            <CalendarMonthGrid year={year} month={month} events={events} defaultColor={defaultColor} />
+            <CalendarMonthGrid year={year} month={month} events={events} calendarColors={calendarColors} />
           </>
         )}
       </div>
