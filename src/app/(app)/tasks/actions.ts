@@ -166,7 +166,7 @@ export async function disconnectSlackAction() {
 }
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
-  TODO: "할 일",
+  TODO: "대기",
   IN_PROGRESS: "진행 중",
   DONE: "완료",
 };
@@ -177,18 +177,14 @@ export async function sendTaskToSlackAction(taskId: string): Promise<ActionState
   if (!task.slackChannelId) return { error: "슬랙 채널을 먼저 선택해 주세요" };
 
   const assignees = (JSON.parse(task.assigneeNames) as string[]).join(", ") || "없음";
-  const due = task.dueDate
-    ? new Date(task.dueDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })
-    : "없음";
+  const due = task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : "없음";
+  const project = task.category ? task.category.name : "없음";
 
   const lines = [
+    "📋 새 할일 등록",
     `*${task.title}*`,
-    task.description ? task.description : null,
-    `담당자: ${assignees}`,
-    `마감일: ${due}`,
-    `상태: ${STATUS_LABELS[task.status]}`,
-    task.category ? `카테고리: ${task.category.name}` : null,
-  ].filter((line): line is string => line !== null);
+    ` 프로젝트: ${project}  |  담당자: ${assignees}  |  데드라인: ${due}  |  상태: ${STATUS_LABELS[task.status]}`,
+  ];
 
   try {
     await sendSlackMessage(task.slackChannelId, lines.join("\n"));
