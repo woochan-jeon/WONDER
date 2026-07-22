@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { TaskStatus } from "@/generated/prisma/enums";
+import { disconnectSlack, sendSlackMessage } from "@/lib/slack";
 
 export type ActionState = { error?: string };
 
@@ -16,6 +17,8 @@ const createTaskSchema = z.object({
     .transform((names) => [...new Set(names.map((n) => n.trim()).filter(Boolean))]),
   categoryId: z.string().trim().optional(),
   dueDate: z.string().trim().optional(),
+  slackChannelId: z.string().trim().optional(),
+  slackChannelName: z.string().trim().optional(),
 });
 
 export async function createTaskAction(
@@ -28,11 +31,14 @@ export async function createTaskAction(
     assigneeNames: formData.getAll("assigneeNames"),
     categoryId: formData.get("categoryId") || undefined,
     dueDate: formData.get("dueDate") || undefined,
+    slackChannelId: formData.get("slackChannelId") || undefined,
+    slackChannelName: formData.get("slackChannelName") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
   }
-  const { title, description, assigneeNames, categoryId, dueDate } = parsed.data;
+  const { title, description, assigneeNames, categoryId, dueDate, slackChannelId, slackChannelName } =
+    parsed.data;
 
   await prisma.task.create({
     data: {
@@ -41,6 +47,8 @@ export async function createTaskAction(
       dueDate: dueDate ? new Date(dueDate) : null,
       assigneeNames: JSON.stringify(assigneeNames),
       categoryId: categoryId || null,
+      slackChannelId: slackChannelId || null,
+      slackChannelName: slackChannelName || null,
     },
   });
 
@@ -58,6 +66,8 @@ const editTaskSchema = z.object({
     .transform((names) => [...new Set(names.map((n) => n.trim()).filter(Boolean))]),
   categoryId: z.string().trim().optional(),
   dueDate: z.string().trim().optional(),
+  slackChannelId: z.string().trim().optional(),
+  slackChannelName: z.string().trim().optional(),
 });
 
 export async function updateTaskAction(
@@ -71,11 +81,14 @@ export async function updateTaskAction(
     assigneeNames: formData.getAll("assigneeNames"),
     categoryId: formData.get("categoryId") || undefined,
     dueDate: formData.get("dueDate") || undefined,
+    slackChannelId: formData.get("slackChannelId") || undefined,
+    slackChannelName: formData.get("slackChannelName") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
   }
-  const { taskId, title, description, assigneeNames, categoryId, dueDate } = parsed.data;
+  const { taskId, title, description, assigneeNames, categoryId, dueDate, slackChannelId, slackChannelName } =
+    parsed.data;
 
   await prisma.task.update({
     where: { id: taskId },
@@ -85,6 +98,8 @@ export async function updateTaskAction(
       dueDate: dueDate ? new Date(dueDate) : null,
       assigneeNames: JSON.stringify(assigneeNames),
       categoryId: categoryId || null,
+      slackChannelId: slackChannelId || null,
+      slackChannelName: slackChannelName || null,
     },
   });
 
@@ -143,4 +158,43 @@ export async function createCategoryAction(
 export async function deleteCategoryAction(categoryId: string) {
   await prisma.category.delete({ where: { id: categoryId } });
   revalidatePath("/tasks");
+}
+
+export async function disconnectSlackAction() {
+  await disconnectSlack();
+  revalidatePath("/tasks");
+}
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  TODO: "할 일",
+  IN_PROGRESS: "진행 중",
+  DONE: "완료",
+};
+
+export async function sendTaskToSlackAction(taskId: string): Promise<ActionState> {
+  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { category: true } });
+  if (!task) return { error: "할일을 찾을 수 없습니다" };
+  if (!task.slackChannelId) return { error: "슬랙 채널을 먼저 선택해 주세요" };
+
+  const assignees = (JSON.parse(task.assigneeNames) as string[]).join(", ") || "없음";
+  const due = task.dueDate
+    ? new Date(task.dueDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })
+    : "없음";
+
+  const lines = [
+    `*${task.title}*`,
+    task.description ? task.description : null,
+    `담당자: ${assignees}`,
+    `마감일: ${due}`,
+    `상태: ${STATUS_LABELS[task.status]}`,
+    task.category ? `카테고리: ${task.category.name}` : null,
+  ].filter((line): line is string => line !== null);
+
+  try {
+    await sendSlackMessage(task.slackChannelId, lines.join("\n"));
+  } catch {
+    return { error: "슬랙 전송에 실패했습니다. 연결을 확인해 주세요." };
+  }
+
+  return {};
 }

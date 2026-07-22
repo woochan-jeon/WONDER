@@ -8,6 +8,7 @@ import {
   deleteTaskAction,
   createCategoryAction,
   deleteCategoryAction,
+  sendTaskToSlackAction,
   type ActionState,
 } from "@/app/(app)/tasks/actions";
 
@@ -16,6 +17,7 @@ import {
 const TEAM_MEMBERS = ["서윤", "태희", "지윤", "우찬", "현아", "혜솔", "서진"];
 
 type Category = { id: string; name: string; color: string };
+type SlackChannel = { id: string; name: string };
 
 type Task = {
   id: string;
@@ -25,6 +27,8 @@ type Task = {
   dueDate: Date | null;
   assignees: string[];
   category: Category | null;
+  slackChannelId: string | null;
+  slackChannelName: string | null;
 };
 
 const STATUS_COLUMNS: { status: Task["status"]; label: string; badgeClass: string }[] = [
@@ -89,6 +93,40 @@ function CategorySelect({
   );
 }
 
+function SlackChannelSelect({
+  channels,
+  defaultChannelId,
+  className,
+}: {
+  channels: SlackChannel[];
+  defaultChannelId?: string | null;
+  className: string;
+}) {
+  const [channelId, setChannelId] = useState(defaultChannelId ?? "");
+  const channelName = channels.find((c) => c.id === channelId)?.name ?? "";
+
+  if (channels.length === 0) return null;
+
+  return (
+    <>
+      <select
+        value={channelId}
+        onChange={(e) => setChannelId(e.target.value)}
+        className={className}
+      >
+        <option value="">슬랙 채널 없음</option>
+        {channels.map((c) => (
+          <option key={c.id} value={c.id}>
+            #{c.name}
+          </option>
+        ))}
+      </select>
+      <input type="hidden" name="slackChannelId" value={channelId} />
+      <input type="hidden" name="slackChannelName" value={channelName} />
+    </>
+  );
+}
+
 function AssigneePicker({ defaultSelected }: { defaultSelected?: string[] }) {
   const [extra, setExtra] = useState("");
   return (
@@ -121,7 +159,15 @@ function AssigneePicker({ defaultSelected }: { defaultSelected?: string[] }) {
   );
 }
 
-export default function TaskBoard({ tasks, categories }: { tasks: Task[]; categories: Category[] }) {
+export default function TaskBoard({
+  tasks,
+  categories,
+  slackChannels,
+}: {
+  tasks: Task[];
+  categories: Category[];
+  slackChannels: SlackChannel[];
+}) {
   const [showNewForm, setShowNewForm] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -195,7 +241,13 @@ export default function TaskBoard({ tasks, categories }: { tasks: Task[]; catego
 
       {showCategoryForm && <NewCategoryForm onDone={() => setShowCategoryForm(false)} />}
 
-      {showNewForm && <NewTaskForm categories={categories} onDone={() => setShowNewForm(false)} />}
+      {showNewForm && (
+        <NewTaskForm
+          categories={categories}
+          slackChannels={slackChannels}
+          onDone={() => setShowNewForm(false)}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {STATUS_COLUMNS.map((col) => (
@@ -212,7 +264,7 @@ export default function TaskBoard({ tasks, categories }: { tasks: Task[]; catego
               {visibleTasks
                 .filter((t) => t.status === col.status)
                 .map((task) => (
-                  <TaskCard key={task.id} task={task} categories={categories} />
+                  <TaskCard key={task.id} task={task} categories={categories} slackChannels={slackChannels} />
                 ))}
               {visibleTasks.filter((t) => t.status === col.status).length === 0 && (
                 <p className="rounded-md border border-dashed border-gray-200 p-4 text-center text-xs text-gray-900">
@@ -273,7 +325,15 @@ function NewCategoryForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function NewTaskForm({ categories, onDone }: { categories: Category[]; onDone: () => void }) {
+function NewTaskForm({
+  categories,
+  slackChannels,
+  onDone,
+}: {
+  categories: Category[];
+  slackChannels: SlackChannel[];
+  onDone: () => void;
+}) {
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
     const result = await createTaskAction(prev, formData);
     if (!result.error) onDone();
@@ -312,6 +372,10 @@ function NewTaskForm({ categories, onDone }: { categories: Category[]; onDone: (
           name="dueDate"
           className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
+        <SlackChannelSelect
+          channels={slackChannels}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
+        />
       </div>
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       <div className="flex justify-end gap-2">
@@ -334,13 +398,30 @@ function NewTaskForm({ categories, onDone }: { categories: Category[]; onDone: (
   );
 }
 
-function TaskCard({ task, categories }: { task: Task; categories: Category[] }) {
+function TaskCard({
+  task,
+  categories,
+  slackChannels,
+}: {
+  task: Task;
+  categories: Category[];
+  slackChannels: SlackChannel[];
+}) {
   const [editing, setEditing] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [sending, startSendTransition] = useTransition();
+  const [sendError, setSendError] = useState<string | null>(null);
   const dueLabel = formatDueDate(task.dueDate);
 
   if (editing) {
-    return <EditTaskForm task={task} categories={categories} onDone={() => setEditing(false)} />;
+    return (
+      <EditTaskForm
+        task={task}
+        categories={categories}
+        slackChannels={slackChannels}
+        onDone={() => setEditing(false)}
+      />
+    );
   }
 
   return (
@@ -372,6 +453,26 @@ function TaskCard({ task, categories }: { task: Task; categories: Category[] }) 
       {task.category && <CategoryBadge category={task.category} />}
 
       {task.description && <p className="text-xs text-gray-900">{task.description}</p>}
+
+      {task.slackChannelId && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setSendError(null);
+              startSendTransition(async () => {
+                const result = await sendTaskToSlackAction(task.id);
+                if (result.error) setSendError(result.error);
+              });
+            }}
+            disabled={sending}
+            className="flex items-center gap-1 self-start rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-900 hover:bg-gray-50 disabled:opacity-60"
+          >
+            <span aria-hidden>💬</span>
+            {sending ? "전송 중..." : `#${task.slackChannelName ?? task.slackChannelId}로 전송`}
+          </button>
+          {sendError && <span className="text-xs text-red-600">{sendError}</span>}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2 pt-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -413,10 +514,12 @@ function TaskCard({ task, categories }: { task: Task; categories: Category[] }) 
 function EditTaskForm({
   task,
   categories,
+  slackChannels,
   onDone,
 }: {
   task: Task;
   categories: Category[];
+  slackChannels: SlackChannel[];
   onDone: () => void;
 }) {
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
@@ -457,6 +560,11 @@ function EditTaskForm({
           type="date"
           name="dueDate"
           defaultValue={toDateInputValue(task.dueDate)}
+          className="rounded-md border border-gray-300 px-2 py-1.5 text-xs outline-none"
+        />
+        <SlackChannelSelect
+          channels={slackChannels}
+          defaultChannelId={task.slackChannelId}
           className="rounded-md border border-gray-300 px-2 py-1.5 text-xs outline-none"
         />
       </div>

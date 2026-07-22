@@ -33,6 +33,10 @@ model Task {
 
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  // Slack channel this task should post updates to, picked per-task.
+  slackChannelId   String?
+  slackChannelName String?
 }
 
 model Category {
@@ -57,6 +61,16 @@ model CalendarConnection {
   refreshToken String
   expiryDate   DateTime
   updatedAt    DateTime @updatedAt
+}
+
+// Singleton row: the team's Slack workspace connection (bot token from OAuth).
+model SlackConnection {
+  id          String   @id @default(cuid())
+  teamName    String
+  teamId      String
+  botUserId   String
+  accessToken String
+  createdAt   DateTime @default(now())
 }
 
 // Curated agenda/decision summaries for the # 회의 아카이브 channel, sourced from
