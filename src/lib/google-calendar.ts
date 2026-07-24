@@ -6,10 +6,12 @@ import { prisma } from "@/lib/prisma";
 // Full calendar access (not just readonly) so the team can pick which of the
 // connected account's calendars to use, and create events from this app.
 // Also includes read-only Drive access so the team can browse the connected
-// account's Drive from the # 드라이브 channel.
+// account's Drive from the # 드라이브 channel, and full Sheets access so the
+// # 회계장부 channel can read and append rows to the team's ledger spreadsheets.
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
