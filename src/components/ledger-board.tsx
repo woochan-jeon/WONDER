@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { addLedgerEntryAction, type ActionState } from "@/app/(app)/ledger/actions";
+import { addLedgerEntryAction, updateLedgerEntryAction, type ActionState } from "@/app/(app)/ledger/actions";
 import type { LedgerEntry } from "@/lib/google-sheets";
 
 const PAYMENT_METHODS = ["계좌이체", "신용카드", "현금"];
@@ -34,7 +34,19 @@ export default function LedgerBoard({
   entries: LedgerEntry[];
 }) {
   const [showNewForm, setShowNewForm] = useState(false);
+  const [editingRow, setEditingRow] = useState<number | null>(null);
   const latestBalance = entries[0]?.balance ?? null;
+  const editingEntry = entries.find((e) => e.row === editingRow) ?? null;
+
+  function openNewForm() {
+    setEditingRow(null);
+    setShowNewForm((v) => !v);
+  }
+
+  function openEditForm(row: number) {
+    setShowNewForm(false);
+    setEditingRow((r) => (r === row ? null : row));
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,7 +80,7 @@ export default function LedgerBoard({
             원본 시트 바로가기 ↗
           </a>
           <button
-            onClick={() => setShowNewForm((v) => !v)}
+            onClick={openNewForm}
             className="rounded-md bg-[#002D56] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#00203C]"
           >
             {showNewForm ? "닫기" : "+ 새 항목"}
@@ -77,11 +89,18 @@ export default function LedgerBoard({
       </div>
 
       {showNewForm && (
-        <NewEntryForm projectId={currentProjectId} onDone={() => setShowNewForm(false)} />
+        <EntryForm projectId={currentProjectId} onDone={() => setShowNewForm(false)} />
+      )}
+      {editingEntry && (
+        <EntryForm
+          projectId={currentProjectId}
+          entry={editingEntry}
+          onDone={() => setEditingRow(null)}
+        />
       )}
 
       <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="w-full min-w-[820px] text-left text-sm">
+        <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500">
             <tr>
               <th className="px-3 py-2 font-medium">날짜</th>
@@ -92,11 +111,12 @@ export default function LedgerBoard({
               <th className="px-3 py-2 text-right font-medium">지출</th>
               <th className="px-3 py-2 text-right font-medium">잔액</th>
               <th className="px-3 py-2 font-medium">비고</th>
+              <th className="px-3 py-2 font-medium"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {entries.map((entry, i) => (
-              <tr key={i} className="text-gray-900">
+            {entries.map((entry) => (
+              <tr key={entry.row} className={`text-gray-900 ${editingRow === entry.row ? "bg-blue-50" : ""}`}>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-500">
                   {entry.date}
                   <span className="ml-1 text-gray-300">{entry.time}</span>
@@ -114,11 +134,19 @@ export default function LedgerBoard({
                   {formatWon(entry.balance)}
                 </td>
                 <td className="px-3 py-2 text-xs text-gray-500">{entry.note}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right">
+                  <button
+                    onClick={() => openEditForm(entry.row)}
+                    className="text-xs text-gray-500 hover:text-[#002D56] hover:underline"
+                  >
+                    {editingRow === entry.row ? "닫기" : "수정"}
+                  </button>
+                </td>
               </tr>
             ))}
             {entries.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-xs text-gray-400">
+                <td colSpan={9} className="px-3 py-8 text-center text-xs text-gray-400">
                   기록 없음
                 </td>
               </tr>
@@ -130,10 +158,20 @@ export default function LedgerBoard({
   );
 }
 
-function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => void }) {
-  const [type, setType] = useState<"income" | "expense">("expense");
+function EntryForm({
+  projectId,
+  entry,
+  onDone,
+}: {
+  projectId: string;
+  entry?: LedgerEntry;
+  onDone: () => void;
+}) {
+  const isEdit = !!entry;
+  const [type, setType] = useState<"income" | "expense">(entry?.income != null ? "income" : "expense");
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
-    const result = await addLedgerEntryAction(prev, formData);
+    const action = isEdit ? updateLedgerEntryAction : addLedgerEntryAction;
+    const result = await action(prev, formData);
     if (!result.error) onDone();
     return result;
   }, initialState);
@@ -144,24 +182,26 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
       className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4"
     >
       <input type="hidden" name="projectId" value={projectId} />
+      {isEdit && <input type="hidden" name="row" value={entry.row} />}
       <div className="flex flex-wrap gap-3">
         <input
           type="date"
           name="date"
-          defaultValue={todayDateValue()}
+          defaultValue={entry?.date || todayDateValue()}
           required
           className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
         <input
           type="time"
           name="time"
-          defaultValue={nowTimeValue()}
+          defaultValue={entry?.time || nowTimeValue()}
           required
           className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
         <input
           name="name"
           placeholder="이름"
+          defaultValue={entry?.name}
           required
           className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
@@ -169,6 +209,7 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
           name="method"
           list="ledger-payment-methods"
           placeholder="결제수단"
+          defaultValue={entry?.method}
           required
           className="w-32 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
@@ -182,6 +223,7 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
       <input
         name="content"
         placeholder="내용"
+        defaultValue={entry?.content}
         required
         autoFocus
         className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
@@ -224,6 +266,7 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
           type="number"
           name="amount"
           placeholder="금액"
+          defaultValue={entry ? (entry.expense ?? entry.income ?? undefined) : undefined}
           min={1}
           step={1}
           required
@@ -235,14 +278,22 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
         <input
           name="note"
           placeholder="비고 (선택)"
+          defaultValue={entry?.note}
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
         <input
           name="receipt"
           placeholder="영수증 (선택, 예: 항공권 영수증.pdf)"
+          defaultValue={entry?.receipt}
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#002D56] focus:ring-1 focus:ring-[#002D56]"
         />
       </div>
+
+      {isEdit && (
+        <p className="text-xs text-amber-600">
+          수정하면 이 항목 이후의 모든 잔액이 새로 계산되어 시트에 다시 기록됩니다.
+        </p>
+      )}
 
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       <div className="flex justify-end gap-2">
@@ -258,7 +309,7 @@ function NewEntryForm({ projectId, onDone }: { projectId: string; onDone: () => 
           disabled={pending}
           className="rounded-md bg-[#002D56] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#00203C] disabled:opacity-60"
         >
-          {pending ? "기록 중..." : "기록"}
+          {pending ? (isEdit ? "수정 중..." : "기록 중...") : isEdit ? "수정" : "기록"}
         </button>
       </div>
     </form>

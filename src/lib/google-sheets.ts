@@ -56,6 +56,9 @@ export function ledgerSheetUrl(project: LedgerProject) {
 }
 
 export type LedgerEntry = {
+  // 1-indexed row number in the sheet (data starts at row 2) — identifies
+  // which row an edit should target.
+  row: number;
   date: string;
   time: string;
   content: string;
@@ -74,8 +77,9 @@ function parseAmount(v: string | undefined | null): number | null {
   return Number.isFinite(n) && v.trim() !== "" ? n : null;
 }
 
-function toEntry(row: string[]): LedgerEntry {
+function toEntry(row: string[], sheetRow: number): LedgerEntry {
   return {
+    row: sheetRow,
     date: row[0] ?? "",
     time: row[1] ?? "",
     content: row[2] ?? "",
@@ -101,7 +105,8 @@ export async function listLedgerEntries(project: LedgerProject): Promise<LedgerE
       range: DATA_RANGE,
       valueRenderOption: "FORMATTED_VALUE",
     });
-    return ((data.values as string[][] | undefined) ?? []).map(toEntry).reverse();
+    const rows = (data.values as string[][] | undefined) ?? [];
+    return rows.map((r, i) => toEntry(r, i + 2)).reverse();
   } catch (err) {
     if (isInsufficientScope(err)) throw new SheetsScopeError();
     throw err;
@@ -164,6 +169,75 @@ export async function appendLedgerEntry(project: LedgerProject, input: NewLedger
         ],
       },
     });
+  } catch (err) {
+    if (isInsufficientScope(err)) throw new SheetsScopeError();
+    throw err;
+  }
+}
+
+/**
+ * Overwrites an existing row in place. Because the sheet stores the running
+ * balance as a literal number rather than a formula, changing a row's amount
+ * shifts every balance after it — so this re-derives the balance for the
+ * edited row and cascades the new balance down through the rest of the
+ * sheet (the other columns of later rows are untouched).
+ */
+export async function updateLedgerEntry(project: LedgerProject, row: number, input: NewLedgerEntryInput) {
+  const authorized = await getAuthorizedClient();
+  const sheets = getSheetsClient(authorized);
+  if (!sheets) throw new Error("연결된 구글 계정이 없습니다");
+
+  try {
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId: project.sheetId,
+      range: DATA_RANGE,
+      valueRenderOption: "FORMATTED_VALUE",
+    });
+    const rows = (data.values as string[][] | undefined) ?? [];
+    const targetIndex = row - 2;
+    if (targetIndex < 0 || targetIndex >= rows.length) throw new Error("해당 항목을 찾을 수 없습니다");
+
+    const prevBalance = targetIndex > 0 ? (parseAmount(rows[targetIndex - 1]?.[7]) ?? 0) : 0;
+    const delta = input.type === "income" ? input.amount : -input.amount;
+    const newBalance = prevBalance + delta;
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: project.sheetId,
+      range: `${SHEET_TAB}!A${row}:J${row}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [
+          [
+            input.date,
+            input.time,
+            input.content,
+            input.name,
+            input.method,
+            input.type === "income" ? input.amount : "",
+            input.type === "expense" ? input.amount : "",
+            newBalance,
+            input.note,
+            input.receipt,
+          ],
+        ],
+      },
+    });
+
+    if (targetIndex + 1 < rows.length) {
+      let runningBalance = newBalance;
+      const cascadeBalances: number[] = [];
+      for (let i = targetIndex + 1; i < rows.length; i++) {
+        const rowDelta = (parseAmount(rows[i]?.[5]) ?? 0) - (parseAmount(rows[i]?.[6]) ?? 0);
+        runningBalance += rowDelta;
+        cascadeBalances.push(runningBalance);
+      }
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: project.sheetId,
+        range: `${SHEET_TAB}!H${row + 1}:H${row + cascadeBalances.length}`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: cascadeBalances.map((b) => [b]) },
+      });
+    }
   } catch (err) {
     if (isInsufficientScope(err)) throw new SheetsScopeError();
     throw err;
