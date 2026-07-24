@@ -100,7 +100,6 @@ export async function listLedgerEntries(project: LedgerProject): Promise<LedgerE
     });
     return ((data.values as string[][] | undefined) ?? []).map(toEntry).reverse();
   } catch (err) {
-    console.error("listLedgerEntries failed:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
     if (isInsufficientScope(err)) throw new SheetsScopeError();
     throw err;
   }

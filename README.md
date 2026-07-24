@@ -78,6 +78,7 @@ cp .env.example .env
 - 어떤 프로젝트가 어떤 시트에 연결되는지는 `src/lib/google-sheets.ts`의 `LEDGER_PROJECTS` 상수에 시트 ID로 하드코딩되어 있습니다. 프로젝트를 추가/변경하려면 이 상수를 수정하세요. 항목 하나가 시트 여러 개에 동시에 기록되게 설정할 수도 있습니다(예: 같은 장부를 공개용/내부용 두 파일로 나눠 쓰는 경우).
 - 대상 시트는 `날짜 | 시간 | 내용 | 이름 | 결제수단 | 수입 | 지출 | 잔액 | 비고 | 영수증` 열 구성과 "회계장부"라는 이름의 탭을 가지고 있어야 합니다. 잔액은 수식이 아니라 이전 잔액에 수입/지출을 더한 값을 앱이 직접 계산해 기록합니다.
 - 시트를 읽고 쓰려면 `spreadsheets` 스코프가 필요합니다. 캘린더/드라이브 연동을 이 기능이 추가되기 전에 이미 설정했다면, **# 회계장부** 채널에 "재연결" 버튼이 뜹니다 — 눌러서 시트 접근 동의를 다시 받아주세요. 기존 캘린더/드라이브 연결은 그대로 유지됩니다.
+- [Google Cloud Console](https://console.cloud.google.com/apis/library/sheets.googleapis.com) → APIs & Services → Library에서 **Google Sheets API**도 별도로 Enable 되어 있어야 합니다 (Google Calendar API와 별개). 활성화되어 있지 않으면 재연결 여부와 무관하게 "시트 접근 권한이 없습니다" 오류가 계속 뜹니다.
 
 ## 6. Slack 연동 설정 (할일 → 슬랙 전송)
 
