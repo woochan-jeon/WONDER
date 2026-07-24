@@ -1,7 +1,13 @@
 import ChannelHeader from "@/components/channel-header";
 import LedgerBoard from "@/components/ledger-board";
 import { getConnectionStatus, isGoogleOAuthConfigured } from "@/lib/google-calendar";
-import { LEDGER_PROJECTS, SheetsScopeError, listLedgerEntries, type LedgerEntry } from "@/lib/google-sheets";
+import {
+  LEDGER_PROJECTS,
+  SheetsScopeError,
+  ledgerSheetUrl,
+  listLedgerEntries,
+  type LedgerEntry,
+} from "@/lib/google-sheets";
 
 export default async function LedgerPage({
   searchParams,
@@ -62,6 +68,7 @@ export default async function LedgerPage({
           <LedgerBoard
             projects={LEDGER_PROJECTS.map(({ id, label }) => ({ id, label }))}
             currentProjectId={project.id}
+            sheetUrl={ledgerSheetUrl(project)}
             entries={entries}
           />
         )}

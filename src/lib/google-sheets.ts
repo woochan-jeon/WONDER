@@ -30,27 +30,30 @@ function getSheetsClient(client: Awaited<ReturnType<typeof getAuthorizedClient>>
 export type LedgerProject = {
   id: string;
   label: string;
-  // Some projects keep more than one spreadsheet in sync by hand (e.g. a
-  // public copy and an internal copy of the same ledger) — every new entry
-  // is appended to all of them, and the first one is used for display/reads.
-  sheetIds: string[];
+  sheetId: string;
 };
 
 export const LEDGER_PROJECTS: LedgerProject[] = [
   {
     id: "team-exhibition",
     label: "팀전시회",
-    sheetIds: [
-      "1jNS3Ol2TUykXGbBGdCsTaCKZJsSyDLi-7YrAJ3rE6yI", // 00. 회계장부(팀전시회)
-      "1ywYzDG6kCzsD4W9nCg1yEIrijqOtnG9ERT-5qaVnAnc", // 00. 내부용 회계장부(팀전시회)
-    ],
+    sheetId: "1jNS3Ol2TUykXGbBGdCsTaCKZJsSyDLi-7YrAJ3rE6yI", // 00. 회계장부(팀전시회)
+  },
+  {
+    id: "team-exhibition-internal",
+    label: "팀전시회(내부용)",
+    sheetId: "1ywYzDG6kCzsD4W9nCg1yEIrijqOtnG9ERT-5qaVnAnc", // 00. 내부용 회계장부(팀전시회)
   },
   {
     id: "startup-club",
     label: "창업동아리",
-    sheetIds: ["1jXT2NW4LDXtnDg2HR_AzmJzNw_WAy2UBFRIxRWtiluQ"], // 02. 회계장부(창업동아리)
+    sheetId: "1jXT2NW4LDXtnDg2HR_AzmJzNw_WAy2UBFRIxRWtiluQ", // 02. 회계장부(창업동아리)
   },
 ];
+
+export function ledgerSheetUrl(project: LedgerProject) {
+  return `https://docs.google.com/spreadsheets/d/${project.sheetId}/edit`;
+}
 
 export type LedgerEntry = {
   date: string;
@@ -94,7 +97,7 @@ export async function listLedgerEntries(project: LedgerProject): Promise<LedgerE
 
   try {
     const { data } = await sheets.spreadsheets.values.get({
-      spreadsheetId: project.sheetIds[0],
+      spreadsheetId: project.sheetId,
       range: DATA_RANGE,
       valueRenderOption: "FORMATTED_VALUE",
     });
@@ -118,9 +121,9 @@ export type NewLedgerEntryInput = {
 };
 
 /**
- * Appends a new row to every sheet in the project, computing each sheet's
- * running balance (수입 - 지출 running total, stored as a literal number in
- * the existing sheets rather than a formula) from its own last row.
+ * Appends a new row to the project's sheet, computing the running balance
+ * (수입 - 지출 running total, stored as a literal number in the existing
+ * sheets rather than a formula) from its last row.
  */
 export async function appendLedgerEntry(project: LedgerProject, input: NewLedgerEntryInput) {
   const authorized = await getAuthorizedClient();
@@ -130,39 +133,37 @@ export async function appendLedgerEntry(project: LedgerProject, input: NewLedger
   const delta = input.type === "income" ? input.amount : -input.amount;
 
   try {
-    for (const spreadsheetId of project.sheetIds) {
-      const { data: balanceData } = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: BALANCE_RANGE,
-        valueRenderOption: "FORMATTED_VALUE",
-      });
-      const balanceRows = (balanceData.values as string[][] | undefined) ?? [];
-      const lastBalance = parseAmount(balanceRows.at(-1)?.[0]) ?? 0;
-      const newBalance = lastBalance + delta;
+    const { data: balanceData } = await sheets.spreadsheets.values.get({
+      spreadsheetId: project.sheetId,
+      range: BALANCE_RANGE,
+      valueRenderOption: "FORMATTED_VALUE",
+    });
+    const balanceRows = (balanceData.values as string[][] | undefined) ?? [];
+    const lastBalance = parseAmount(balanceRows.at(-1)?.[0]) ?? 0;
+    const newBalance = lastBalance + delta;
 
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: DATA_RANGE,
-        valueInputOption: "USER_ENTERED",
-        insertDataOption: "INSERT_ROWS",
-        requestBody: {
-          values: [
-            [
-              input.date,
-              input.time,
-              input.content,
-              input.name,
-              input.method,
-              input.type === "income" ? input.amount : "",
-              input.type === "expense" ? input.amount : "",
-              newBalance,
-              input.note,
-              input.receipt,
-            ],
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: project.sheetId,
+      range: DATA_RANGE,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        values: [
+          [
+            input.date,
+            input.time,
+            input.content,
+            input.name,
+            input.method,
+            input.type === "income" ? input.amount : "",
+            input.type === "expense" ? input.amount : "",
+            newBalance,
+            input.note,
+            input.receipt,
           ],
-        },
-      });
-    }
+        ],
+      },
+    });
   } catch (err) {
     if (isInsufficientScope(err)) throw new SheetsScopeError();
     throw err;

@@ -25,10 +25,12 @@ function nowTimeValue() {
 export default function LedgerBoard({
   projects,
   currentProjectId,
+  sheetUrl,
   entries,
 }: {
   projects: { id: string; label: string }[];
   currentProjectId: string;
+  sheetUrl: string;
   entries: LedgerEntry[];
 }) {
   const [showNewForm, setShowNewForm] = useState(false);
@@ -56,12 +58,22 @@ export default function LedgerBoard({
         <p className="text-sm text-gray-900">
           총 {entries.length}건{latestBalance !== null && ` · 현재 잔액 ${formatWon(latestBalance)}`}
         </p>
-        <button
-          onClick={() => setShowNewForm((v) => !v)}
-          className="rounded-md bg-[#002D56] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#00203C]"
-        >
-          {showNewForm ? "닫기" : "+ 새 항목"}
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href={sheetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            원본 시트 바로가기 ↗
+          </a>
+          <button
+            onClick={() => setShowNewForm((v) => !v)}
+            className="rounded-md bg-[#002D56] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#00203C]"
+          >
+            {showNewForm ? "닫기" : "+ 새 항목"}
+          </button>
+        </div>
       </div>
 
       {showNewForm && (
