@@ -253,3 +253,70 @@ model MeetingSummary {
   createdAt   DateTime @default(now())
 }
 
+
+// A person tracked in # 장관인증요건. Like WorkLogMember this is just a name
+// registry (no accounts); the simple yes/no conditions live on the row itself.
+// GPA is stored only as "met or not" — the actual grade is deliberately never
+// collected.
+model CertMember {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gpaOk           Boolean   @default(false)
+  gpaCheckedAt    DateTime?
+  // 시장진출보고서 — everyone has submitted it by default.
+  reportSubmitted Boolean   @default(true)
+
+  certGukmusa1      Boolean @default(false) // 국제무역사 1급 (path A)
+  certTradeEnglish1 Boolean @default(false) // 무역영어 1급 (path B, required)
+  certLogistics     Boolean @default(false) // 물류관리사 (path B, pick one)
+  certDistribution1 Boolean @default(false) // 유통관리사 1급 (path B, pick one)
+  certDistribution2 Boolean @default(false) // 유통관리사 2급 (path B, pick one)
+  certImportManager Boolean @default(false) // 수입관리사 (path B, pick one)
+
+  langScores  CertLangScore[]
+  exhibitions CertExhibition[]
+}
+
+// One registered language test result. `exam` is an exam id from
+// src/lib/minister-cert.ts; `grade` holds the grade/level option for
+// grade-based exams and `score` the numeric score where the exam needs one.
+// The TOEIC-equivalent verdict is computed from the conversion table on read,
+// not stored, so table/threshold changes apply retroactively.
+model CertLangScore {
+  id        String   @id @default(cuid())
+  exam      String
+  grade     String?
+  score     Int?
+  createdAt DateTime @default(now())
+
+  memberId String
+  member   CertMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+}
+
+enum CertExhibitionLocation {
+  DOMESTIC
+  OVERSEAS
+}
+
+// One personal exhibition participation counted toward the 80-hour GTEP
+// requirement in # 장관인증요건.
+model CertExhibition {
+  id        String                 @id @default(cuid())
+  name      String
+  location  CertExhibitionLocation
+  startDate DateTime
+  endDate   DateTime
+  hours     Float
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  memberId String
+  member   CertMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+}

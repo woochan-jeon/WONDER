@@ -10,6 +10,7 @@ const CHANNELS = [
   { href: "/worklog", label: "업무일지", icon: "📔" },
   { href: "/schedule", label: "일정", icon: "🗓️" },
   { href: "/marketing", label: "마케팅", icon: "📊" },
+  { href: "/certification", label: "장관인증요건", icon: "🎖️" },
   { href: "/drive", label: "드라이브", icon: "🗂️" },
   { href: "/minutes", label: "회의록", icon: "📝" },
   { href: "/archive", label: "회의 아카이브", icon: "🗄️" },
