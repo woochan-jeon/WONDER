@@ -3,6 +3,7 @@ import { google, sheets_v4 } from "googleapis";
 import { getAuthorizedClient } from "@/lib/google-calendar";
 import { prisma } from "@/lib/prisma";
 import { toDateKey } from "@/lib/calendar-grid";
+import { isCurrencyCode } from "@/lib/currency";
 import type { MarketingCategory, MarketingExpense, MarketingProject } from "@/generated/prisma/client";
 
 /**
@@ -33,7 +34,7 @@ const SPREADSHEET_TITLE = "WONDER 마케팅 채널";
 // treated as new records; rows with an ID that no longer exists in the sheet
 // are simply re-added on the next sync rather than deleted (see syncMarketingSheet).
 const PROJECTS_TAB = "프로젝트";
-const PROJECTS_HEADER = ["ID (수정 금지)", "이름", "색상(#RRGGBB)"];
+const PROJECTS_HEADER = ["ID (수정 금지)", "이름", "색상(#RRGGBB)", "통화(KRW/JPY/SGD)"];
 const CATEGORIES_TAB = "카테고리";
 const CATEGORIES_HEADER = ["ID (수정 금지)", "프로젝트", "이름", "색상(#RRGGBB)"];
 const BUDGETS_TAB = "예산";
@@ -138,6 +139,12 @@ function cell(row: string[], index: number) {
   return (row[index] ?? "").trim();
 }
 
+// Amounts are in each project's own currency and may carry cents (SGD), so
+// keep the decimal point; everything else (commas, currency symbols) is dropped.
+function parseAmount(value: string) {
+  return Number.parseFloat(value.replace(/[^\d.-]/g, ""));
+}
+
 async function reconcileProjects(rows: string[][]) {
   const existing = await prisma.marketingProject.findMany();
   const byId = new Map(existing.map((p) => [p.id, p]));
@@ -147,14 +154,19 @@ async function reconcileProjects(rows: string[][]) {
     const name = cell(row, 1);
     if (!name) continue;
     const color = normalizeColor(row[2], "#0066cc");
+    const currencyCell = cell(row, 3).toUpperCase();
 
     if (id && byId.has(id)) {
       const current = byId.get(id)!;
-      if (current.name !== name || current.color !== color) {
-        await prisma.marketingProject.update({ where: { id }, data: { name, color } }).catch(() => {});
+      // A blank/unknown currency cell (e.g. a sheet written before the column
+      // existed) keeps the project's current currency.
+      const currency = isCurrencyCode(currencyCell) ? currencyCell : current.currency;
+      if (current.name !== name || current.color !== color || current.currency !== currency) {
+        await prisma.marketingProject.update({ where: { id }, data: { name, color, currency } }).catch(() => {});
       }
     } else if (!id && !existing.some((p) => p.name === name)) {
-      await prisma.marketingProject.create({ data: { name, color } }).catch(() => {});
+      const currency = isCurrencyCode(currencyCell) ? currencyCell : "KRW";
+      await prisma.marketingProject.create({ data: { name, color, currency } }).catch(() => {});
     }
   }
 }
@@ -197,7 +209,7 @@ async function reconcileBudgets(rows: string[][]) {
     const categoryId = category?.id ?? null;
     const year = Number.parseInt(cell(row, 3), 10);
     const month = Number.parseInt(cell(row, 4), 10);
-    const amount = Number.parseInt(cell(row, 5).replace(/[^\d-]/g, ""), 10);
+    const amount = parseAmount(cell(row, 5));
     if (!project || !Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(amount)) continue;
     if (categoryName && !category) continue;
     if (month < 1 || month > 12) continue;
@@ -233,7 +245,7 @@ async function reconcileExpenses(rows: string[][]) {
     const category = categoryName ? project.categories.find((c) => c.name === categoryName) : undefined;
     const channel = cell(row, 4);
     const description = cell(row, 5);
-    const amount = Number.parseInt(cell(row, 6).replace(/[^\d-]/g, ""), 10);
+    const amount = parseAmount(cell(row, 6));
     const paymentMethod = cell(row, 7);
     const note = cell(row, 8);
     if (!channel || !description || !Number.isFinite(amount) || !paymentMethod) continue;
@@ -270,7 +282,7 @@ async function reconcileExpenses(rows: string[][]) {
 }
 
 function projectRows(projects: MarketingProject[]): string[][] {
-  return projects.map((p) => [p.id, p.name, p.color]);
+  return projects.map((p) => [p.id, p.name, p.color, p.currency]);
 }
 
 function categoryRows(categories: (MarketingCategory & { project: MarketingProject })[]): string[][] {
@@ -311,6 +323,26 @@ function expenseRows(
     e.paymentMethod,
     e.note ?? "",
   ]);
+}
+
+// Sheets created before a column was added keep their old header row;
+// rewrite any header that no longer matches so new columns get labeled.
+async function ensureHeaders(sheets: sheets_v4.Sheets, spreadsheetId: string) {
+  const { data } = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId,
+    ranges: TABS.map((tab) => `'${tab.name}'!A1:${colLetter(tab.header.length)}1`),
+  });
+  const stale = TABS.filter(
+    (tab, i) => !sameRows((data.valueRanges?.[i]?.values ?? []) as string[][], [[...tab.header]]),
+  );
+  if (stale.length === 0) return;
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: "RAW",
+      data: stale.map((tab) => ({ range: `'${tab.name}'!A1`, values: [[...tab.header]] })),
+    },
+  });
 }
 
 function sameRows(a: string[][], b: string[][]) {
@@ -368,6 +400,7 @@ export async function syncMarketingSheet(): Promise<string | null> {
     (range) => (range.values ?? []) as string[][],
   );
 
+  await ensureHeaders(sheets, spreadsheetId);
   await reconcileProjects(projectRowsIn ?? []);
   await reconcileCategories(categoryRowsIn ?? []);
   await reconcileBudgets(budgetRowsIn ?? []);

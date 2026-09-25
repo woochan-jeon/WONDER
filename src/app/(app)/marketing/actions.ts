@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { syncMarketingSheet } from "@/lib/google-sheets";
+import { CURRENCIES, CURRENCY_CODES, FOREIGN_CURRENCIES, toCurrencyCode } from "@/lib/currency";
 
 export type ActionState = { error?: string };
 
@@ -22,7 +23,16 @@ const createProjectSchema = z.object({
     .string()
     .trim()
     .regex(/^#[0-9a-fA-F]{6}$/, "올바른 색상 값이 아닙니다"),
+  currency: z.enum(CURRENCY_CODES, { message: "통화를 선택해 주세요" }),
 });
+
+// Rounds an amount to what its project's currency can express (whole 원/엔,
+// 싱가포르 달러 to the cent), so float noise from the form never gets stored.
+async function roundForProject(projectId: string, amount: number) {
+  const project = await prisma.marketingProject.findUnique({ where: { id: projectId }, select: { currency: true } });
+  const factor = 10 ** CURRENCIES[toCurrencyCode(project?.currency ?? "KRW")].decimals;
+  return Math.round(amount * factor) / factor;
+}
 
 export async function createProjectAction(
   _prevState: ActionState,
@@ -31,17 +41,48 @@ export async function createProjectAction(
   const parsed = createProjectSchema.safeParse({
     name: formData.get("name"),
     color: formData.get("color"),
+    currency: formData.get("currency") || "KRW",
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { name, color } = parsed.data;
+  const { name, color, currency } = parsed.data;
 
   const existing = await prisma.marketingProject.findUnique({ where: { name } });
   if (existing) return { error: "이미 있는 프로젝트 이름입니다" };
 
-  await prisma.marketingProject.create({ data: { name, color } });
+  await prisma.marketingProject.create({ data: { name, color, currency } });
   await syncMarketingSheetQuietly();
   revalidatePath("/marketing");
   return {};
+}
+
+// Changes only the unit — existing amounts keep their numbers, so this is
+// for fixing a project's currency, not converting its history.
+export async function updateProjectCurrencyAction(projectId: string, currency: string) {
+  const parsed = z.enum(CURRENCY_CODES).safeParse(currency);
+  if (!parsed.success) return;
+  await prisma.marketingProject.updateMany({ where: { id: projectId }, data: { currency: parsed.data } });
+  await syncMarketingSheetQuietly();
+  revalidatePath("/marketing");
+}
+
+const exchangeRateSchema = z.object({
+  currency: z.enum(FOREIGN_CURRENCIES as [string, ...string[]]),
+  rate: z.coerce.number({ message: "환율을 입력해 주세요" }).positive("0보다 큰 환율을 입력해 주세요").max(100000),
+});
+
+export async function setExchangeRateAction(_prevState: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = exchangeRateSchema.safeParse({ currency: formData.get("currency"), rate: formData.get("rate") });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
+  const { currency, rate } = parsed.data;
+  await prisma.marketingExchangeRate.upsert({ where: { currency }, create: { currency, rate }, update: { rate } });
+  revalidatePath("/marketing");
+  return {};
+}
+
+/** Drops a manual override so the currency goes back to the live default rate. */
+export async function resetExchangeRateAction(currency: string) {
+  await prisma.marketingExchangeRate.deleteMany({ where: { currency } });
+  revalidatePath("/marketing");
 }
 
 export async function deleteProjectAction(projectId: string) {
@@ -93,7 +134,7 @@ const setBudgetSchema = z.object({
   categoryId: z.string().trim().optional(),
   year: z.coerce.number().int().min(2000).max(2100),
   month: z.coerce.number().int().min(1).max(12),
-  amount: z.coerce.number().int().min(0, "0 이상의 금액을 입력해 주세요"),
+  amount: z.coerce.number().min(0, "0 이상의 금액을 입력해 주세요"),
 });
 
 export async function setBudgetAction(_prevState: ActionState, formData: FormData): Promise<ActionState> {
@@ -105,8 +146,9 @@ export async function setBudgetAction(_prevState: ActionState, formData: FormDat
     amount: formData.get("amount"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { projectId, categoryId, year, month, amount } = parsed.data;
+  const { projectId, categoryId, year, month } = parsed.data;
   const category = categoryId || null;
+  const amount = await roundForProject(projectId, parsed.data.amount);
 
   // Prisma's compound-unique lookup can't take null for a nullable field, so
   // upsert on (projectId, categoryId, year, month) manually.
@@ -129,7 +171,7 @@ const expenseSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "날짜를 선택해 주세요"),
   channel: z.string().trim().min(1, "채널을 입력해 주세요").max(60),
   description: z.string().trim().min(1, "어떤 마케팅인지 입력해 주세요").max(500),
-  amount: z.coerce.number().int().min(0, "0 이상의 금액을 입력해 주세요"),
+  amount: z.coerce.number().min(0, "0 이상의 금액을 입력해 주세요"),
   paymentMethod: z.string().trim().min(1, "지출 방식을 입력해 주세요").max(60),
   note: z.string().trim().max(1000).optional(),
 });
@@ -149,7 +191,8 @@ export async function createExpenseAction(
     note: formData.get("note") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { projectId, categoryId, date, channel, description, amount, paymentMethod, note } = parsed.data;
+  const { projectId, categoryId, date, channel, description, paymentMethod, note } = parsed.data;
+  const amount = await roundForProject(projectId, parsed.data.amount);
 
   await prisma.marketingExpense.create({
     data: {
@@ -186,8 +229,8 @@ export async function updateExpenseAction(
     note: formData.get("note") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { expenseId, projectId, categoryId, date, channel, description, amount, paymentMethod, note } =
-    parsed.data;
+  const { expenseId, projectId, categoryId, date, channel, description, paymentMethod, note } = parsed.data;
+  const amount = await roundForProject(projectId, parsed.data.amount);
 
   const result = await prisma.marketingExpense.updateMany({
     where: { id: expenseId },

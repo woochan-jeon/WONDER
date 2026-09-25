@@ -168,6 +168,9 @@ model MarketingProject {
   id        String   @id @default(cuid())
   name      String   @unique
   color     String   @default("#0066cc")
+  // ISO code (KRW/JPY/SGD, see src/lib/currency.ts). All of this project's
+  // budget and expense amounts are in this currency.
+  currency  String   @default("KRW")
   createdAt DateTime @default(now())
 
   budgets    MarketingBudget[]
@@ -203,7 +206,7 @@ model MarketingBudget {
   id        String   @id @default(cuid())
   year      Int
   month     Int // 1-12
-  amount    Int
+  amount    Float // in the project's currency
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -223,7 +226,7 @@ model MarketingExpense {
   date          DateTime
   channel       String
   description   String
-  amount        Int
+  amount        Float // in the project's currency
   paymentMethod String
   note          String?
   createdAt     DateTime @default(now())
@@ -237,6 +240,15 @@ model MarketingExpense {
 
   @@index([date])
   @@index([projectId, date])
+}
+
+// A manually set KRW-per-unit exchange rate for # 마케팅. Without a row the
+// live rate (see src/lib/exchange-rates.ts) is used, so a row only exists
+// once someone has overridden the default.
+model MarketingExchangeRate {
+  currency  String   @id
+  rate      Float
+  updatedAt DateTime @updatedAt
 }
 
 // Curated agenda/decision summaries for the # 회의 아카이브 channel, sourced from

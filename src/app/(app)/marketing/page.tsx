@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { monthParam, parseMonthParam, shiftMonth, toDateKey } from "@/lib/calendar-grid";
 import { getConnectionStatus, isGoogleOAuthConfigured } from "@/lib/google-calendar";
 import { SheetsScopeError, getMarketingSheetUrl, syncMarketingSheet } from "@/lib/google-sheets";
+import { toCurrencyCode } from "@/lib/currency";
+import { getExchangeRates } from "@/lib/exchange-rates";
 
 export default async function MarketingPage({
   searchParams,
@@ -43,7 +45,8 @@ export default async function MarketingPage({
     }
   }
 
-  const [projects, categories, budgets, expenseRows, channelRows, paymentMethodRows] = await Promise.all([
+  const [exchangeRates, projects, categories, budgets, expenseRows, channelRows, paymentMethodRows] = await Promise.all([
+    getExchangeRates(),
     prisma.marketingProject.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.marketingCategory.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.marketingBudget.findMany({ where: { year, month: calendarMonth } }),
@@ -130,7 +133,8 @@ export default async function MarketingPage({
           prevHref={prevHref}
           nextHref={nextHref}
           todayHref={todayHref}
-          projects={projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
+          projects={projects.map((p) => ({ id: p.id, name: p.name, color: p.color, currency: toCurrencyCode(p.currency) }))}
+          exchangeRates={exchangeRates}
           categories={categories.map((c) => ({ id: c.id, name: c.name, color: c.color, projectId: c.projectId }))}
           budgets={budgets.map((b) => ({ projectId: b.projectId, categoryId: b.categoryId, amount: b.amount }))}
           expenses={expenses}

@@ -1,7 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useRef, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
+import {
+  createContext,
+  useActionState,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import {
   createCategoryAction,
   createExpenseAction,
@@ -9,12 +19,27 @@ import {
   deleteCategoryAction,
   deleteExpenseAction,
   deleteProjectAction,
+  resetExchangeRateAction,
   setBudgetAction,
+  setExchangeRateAction,
   updateExpenseAction,
+  updateProjectCurrencyAction,
   type ActionState,
 } from "@/app/(app)/marketing/actions";
+import {
+  CURRENCIES,
+  CURRENCY_CODES,
+  FOREIGN_CURRENCIES,
+  amountStep,
+  formatMoney,
+  krwHint,
+  toKrw,
+  type CurrencyCode,
+  type ExchangeRateInfo,
+  type ExchangeRates,
+} from "@/lib/currency";
 
-type ProjectVM = { id: string; name: string; color: string };
+type ProjectVM = { id: string; name: string; color: string; currency: CurrencyCode };
 type CategoryVM = { id: string; name: string; color: string; projectId: string };
 type BudgetVM = { projectId: string; categoryId: string | null; amount: number };
 type ExpenseVM = {
@@ -42,9 +67,8 @@ const PROJECT_COLOR_SWATCHES = [
 
 const initialState: ActionState = {};
 
-function formatWon(amount: number) {
-  return `${amount.toLocaleString("ko-KR")}원`;
-}
+// KRW-per-unit rates, read by every amount display for its "≈ 원" hint.
+const RatesContext = createContext<ExchangeRates>({ KRW: 1, JPY: 1, SGD: 1 });
 
 export default function MarketingBoard({
   year,
@@ -59,6 +83,7 @@ export default function MarketingBoard({
   expenses,
   channelSuggestions,
   paymentMethodSuggestions,
+  exchangeRates,
 }: {
   year: number;
   month: number;
@@ -72,7 +97,9 @@ export default function MarketingBoard({
   expenses: ExpenseVM[];
   channelSuggestions: string[];
   paymentMethodSuggestions: string[];
+  exchangeRates: ExchangeRateInfo;
 }) {
+  const rates = exchangeRates.rates;
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [managingProjects, setManagingProjects] = useState(false);
@@ -104,8 +131,16 @@ export default function MarketingBoard({
     return map;
   }, [expenses]);
 
-  const totalBudget = Array.from(budgetByProject.values()).reduce((sum, amount) => sum + amount, 0);
-  const totalSpend = expenses.reduce((sum, e) => sum + e.amount, 0);
+  // The overall card mixes projects in different currencies, so it's totaled in KRW.
+  const currencyByProject = new Map(projects.map((p) => [p.id, p.currency]));
+  const currencyOf = (projectId: string): CurrencyCode => currencyByProject.get(projectId) ?? "KRW";
+  const totalBudget = Array.from(budgetByProject.entries()).reduce(
+    (sum, [projectId, amount]) => sum + toKrw(amount, currencyOf(projectId), rates),
+    0,
+  );
+  const totalSpend = expenses.reduce((sum, e) => sum + toKrw(e.amount, currencyOf(e.projectId), rates), 0);
+  const hasForeignProject = projects.some((p) => p.currency !== "KRW");
+  const activeCurrency = activeProjectId ? currencyOf(activeProjectId) : "KRW";
 
   const projectExpenses = activeProjectId
     ? expenses.filter((e) => e.projectId === activeProjectId)
@@ -131,6 +166,7 @@ export default function MarketingBoard({
   const editingExpense = editingExpenseId ? expenses.find((e) => e.id === editingExpenseId) ?? null : null;
 
   return (
+    <RatesContext.Provider value={rates}>
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -170,8 +206,9 @@ export default function MarketingBoard({
       )}
 
       <SummaryCard
-        label="전체"
+        label={hasForeignProject ? "전체 (원화 환산)" : "전체"}
         color="#111827"
+        currency="KRW"
         budget={totalBudget}
         spend={totalSpend}
         active={activeProjectId === null}
@@ -212,6 +249,7 @@ export default function MarketingBoard({
             label="전체"
             color="#111827"
             amount={projectExpenses.reduce((sum, e) => sum + e.amount, 0)}
+            currency={activeCurrency}
             active={activeCategoryId === null}
             onClick={() => setActiveCategoryId(null)}
           />
@@ -221,6 +259,7 @@ export default function MarketingBoard({
                 <CategorySummary
                   key={c.id}
                   category={c}
+                  currency={activeCurrency}
                   projectId={activeProjectId}
                   year={year}
                   month={month}
@@ -255,7 +294,7 @@ export default function MarketingBoard({
         </button>
       </div>
 
-      {managingProjects && <ProjectManagePanel projects={projects} />}
+      {managingProjects && <ProjectManagePanel projects={projects} exchangeRates={exchangeRates} />}
 
       <ExpenseTable
         expenses={visibleExpenses}
@@ -275,12 +314,14 @@ export default function MarketingBoard({
         />
       )}
     </div>
+    </RatesContext.Provider>
   );
 }
 
 function SummaryCard({
   label,
   color,
+  currency,
   budget,
   spend,
   active,
@@ -289,12 +330,14 @@ function SummaryCard({
 }: {
   label: string;
   color: string;
+  currency: CurrencyCode;
   budget: number;
   spend: number;
   active: boolean;
   onClick: () => void;
   children?: ReactNode;
 }) {
+  const rates = useContext(RatesContext);
   const hasBudget = budget > 0;
   const pct = hasBudget ? Math.round((spend / budget) * 100) : null;
   const over = hasBudget && spend > budget;
@@ -317,9 +360,15 @@ function SummaryCard({
         )}
       </div>
       <p className="text-lg font-semibold text-gray-900">
-        {formatWon(spend)}
-        {hasBudget && <span className="ml-1 text-xs font-normal text-gray-400">/ {formatWon(budget)}</span>}
+        {formatMoney(spend, currency)}
+        {hasBudget && <span className="ml-1 text-xs font-normal text-gray-400">/ {formatMoney(budget, currency)}</span>}
       </p>
+      {currency !== "KRW" && (
+        <p className="-mt-1 text-xs text-gray-400">
+          {krwHint(spend, currency, rates)}
+          {hasBudget && ` / ${formatMoney(toKrw(budget, currency, rates), "KRW")}`}
+        </p>
+      )}
       {hasBudget && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
           <div
@@ -330,7 +379,7 @@ function SummaryCard({
       )}
       {hasBudget && (
         <p className={`text-xs ${over ? "text-red-600" : "text-gray-500"}`}>
-          {over ? `${formatWon(spend - budget)} 초과` : `${formatWon(budget - spend)} 남음`}
+          {over ? `${formatMoney(spend - budget, currency)} 초과` : `${formatMoney(budget - spend, currency)} 남음`}
         </p>
       )}
       {children}
@@ -367,8 +416,9 @@ function ProjectSummary({
   return (
     <div className="flex flex-col gap-1.5">
       <SummaryCard
-        label={project.name}
+        label={project.currency === "KRW" ? project.name : `${project.name} · ${CURRENCIES[project.currency].label}`}
         color={project.color}
+        currency={project.currency}
         budget={budget ?? 0}
         spend={spend}
         active={active}
@@ -385,9 +435,9 @@ function ProjectSummary({
                     {c.name}
                   </span>
                   <span>
-                    {formatWon(spendByCategory.get(c.id) ?? 0)}
+                    {formatMoney(spendByCategory.get(c.id) ?? 0, project.currency)}
                     {categoryBudget > 0 && (
-                      <span className="text-gray-400"> / {formatWon(categoryBudget)}</span>
+                      <span className="text-gray-400"> / {formatMoney(categoryBudget, project.currency)}</span>
                     )}
                   </span>
                 </div>
@@ -399,6 +449,7 @@ function ProjectSummary({
       {editingBudget ? (
         <BudgetForm
           projectId={project.id}
+          currency={project.currency}
           categoryId={null}
           year={year}
           month={month}
@@ -420,6 +471,7 @@ function ProjectSummary({
 
 function BudgetForm({
   projectId,
+  currency,
   categoryId,
   year,
   month,
@@ -427,12 +479,16 @@ function BudgetForm({
   onDone,
 }: {
   projectId: string;
+  currency: CurrencyCode;
   categoryId: string | null;
   year: number;
   month: number;
   defaultAmount: number | null;
   onDone: () => void;
 }) {
+  const rates = useContext(RatesContext);
+  const [amount, setAmount] = useState(defaultAmount !== null ? String(defaultAmount) : "");
+  const hint = amount === "" ? null : krwHint(Number(amount), currency, rates);
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
     const result = await setBudgetAction(prev, formData);
     if (!result.error) onDone();
@@ -449,13 +505,15 @@ function BudgetForm({
         name="amount"
         type="number"
         min={0}
-        step={10000}
+        step={amountStep(currency)}
         autoFocus
         required
-        defaultValue={defaultAmount ?? ""}
-        placeholder="목표 예산(원)"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        placeholder={`목표 예산(${CURRENCIES[currency].unit})`}
         className="w-32 rounded-md border border-gray-300 px-2 py-1 text-xs outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
       />
+      {hint && <span className="text-xs text-gray-400">{hint}</span>}
       <button
         type="submit"
         disabled={pending}
@@ -473,6 +531,7 @@ function BudgetForm({
 
 function CategorySummary({
   category,
+  currency,
   projectId,
   year,
   month,
@@ -482,6 +541,7 @@ function CategorySummary({
   onClick,
 }: {
   category: CategoryVM;
+  currency: CurrencyCode;
   projectId: string;
   year: number;
   month: number;
@@ -494,10 +554,11 @@ function CategorySummary({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <SummaryCard label={category.name} color={category.color} budget={budget ?? 0} spend={spend} active={active} onClick={onClick} />
+      <SummaryCard label={category.name} color={category.color} currency={currency} budget={budget ?? 0} spend={spend} active={active} onClick={onClick} />
       {editingBudget ? (
         <BudgetForm
           projectId={projectId}
+          currency={currency}
           categoryId={category.id}
           year={year}
           month={month}
@@ -517,9 +578,10 @@ function CategorySummary({
   );
 }
 
-function ProjectManagePanel({ projects }: { projects: ProjectVM[] }) {
+function ProjectManagePanel({ projects, exchangeRates }: { projects: ProjectVM[]; exchangeRates: ExchangeRateInfo }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [color, setColor] = useState(PROJECT_COLOR_SWATCHES[0]);
+  const [currency, setCurrency] = useState<CurrencyCode>("KRW");
   const [, startTransition] = useTransition();
   const [state, formAction, pending] = useActionState(async (prev: ActionState, formData: FormData) => {
     const result = await createProjectAction(prev, formData);
@@ -534,6 +596,27 @@ function ProjectManagePanel({ projects }: { projects: ProjectVM[] }) {
           <span key={p.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs text-gray-600 ring-1 ring-gray-200">
             <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: p.color }} aria-hidden />
             {p.name}
+            <select
+              value={p.currency}
+              aria-label={`${p.name} 통화`}
+              onChange={(e) => {
+                const next = e.target.value as CurrencyCode;
+                if (
+                  confirm(
+                    `"${p.name}" 프로젝트의 통화를 ${CURRENCIES[next].label}(으)로 바꿀까요? 이미 입력한 예산/지출 금액은 숫자 그대로 두고 단위만 바뀝니다.`,
+                  )
+                ) {
+                  startTransition(() => updateProjectCurrencyAction(p.id, next));
+                }
+              }}
+              className="rounded border-none bg-transparent py-0 pr-5 pl-1 text-xs text-gray-500 outline-none hover:bg-gray-50"
+            >
+              {CURRENCY_CODES.map((c) => (
+                <option key={c} value={c}>
+                  {CURRENCIES[c].label}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => {
@@ -558,6 +641,19 @@ function ProjectManagePanel({ projects }: { projects: ProjectVM[] }) {
           required
           className="w-48 rounded-md border border-gray-300 px-2 py-1 text-xs outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
         />
+        <select
+          name="currency"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+          aria-label="통화"
+          className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+        >
+          {CURRENCY_CODES.map((c) => (
+            <option key={c} value={c}>
+              {CURRENCIES[c].label} ({c})
+            </option>
+          ))}
+        </select>
         <div className="flex items-center gap-1">
           {PROJECT_COLOR_SWATCHES.map((swatch) => (
             <button
@@ -579,7 +675,86 @@ function ProjectManagePanel({ projects }: { projects: ProjectVM[] }) {
         </button>
       </form>
       {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+      <div className="flex flex-col gap-1.5 border-t border-gray-200 pt-2">
+        <p className="text-xs font-medium text-gray-500">
+          환율 (원화 환산 표시에 사용)
+          {!exchangeRates.live && (
+            <span className="ml-1 font-normal text-amber-700">· 실시간 환율을 불러오지 못해 저장된 기본값을 사용 중</span>
+          )}
+        </p>
+        {FOREIGN_CURRENCIES.map((c) => (
+          <ExchangeRateRow
+            key={`${c}-${exchangeRates.rates[c]}`}
+            currency={c}
+            rate={exchangeRates.rates[c]}
+            defaultRate={exchangeRates.defaults[c]}
+            overridden={exchangeRates.overridden.includes(c)}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+function formatRate(rate: number) {
+  return rate.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+
+function ExchangeRateRow({
+  currency,
+  rate,
+  defaultRate,
+  overridden,
+}: {
+  currency: CurrencyCode;
+  rate: number;
+  defaultRate: number;
+  overridden: boolean;
+}) {
+  const [resetting, startReset] = useTransition();
+  const [state, formAction, pending] = useActionState(setExchangeRateAction, initialState);
+
+  return (
+    <form action={formAction} className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+      <input type="hidden" name="currency" value={currency} />
+      <span className="w-32">
+        1 {CURRENCIES[currency].unit} ({currency}) =
+      </span>
+      <input
+        name="rate"
+        type="number"
+        min={0}
+        step="any"
+        required
+        defaultValue={Math.round(rate * 100) / 100}
+        aria-label={`${CURRENCIES[currency].label} 환율`}
+        className="w-24 rounded-md border border-gray-300 px-2 py-1 text-xs outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+      />
+      <span>원</span>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-full bg-[#0066cc] px-2 py-1 text-xs text-white hover:bg-[#0071e3] disabled:opacity-60"
+      >
+        저장
+      </button>
+      {overridden ? (
+        <>
+          <span className="text-amber-700">직접 입력한 값</span>
+          <button
+            type="button"
+            disabled={resetting}
+            onClick={() => startReset(() => resetExchangeRateAction(currency))}
+            className="text-gray-500 underline decoration-dotted hover:text-gray-700 disabled:opacity-60"
+          >
+            현재 환율({formatRate(defaultRate)}원)로 되돌리기
+          </button>
+        </>
+      ) : (
+        <span className="text-gray-400">현재 환율 기준</span>
+      )}
+      {state.error && <span className="text-red-600">{state.error}</span>}
+    </form>
   );
 }
 
@@ -587,12 +762,14 @@ function CategoryChip({
   label,
   color,
   amount,
+  currency,
   active,
   onClick,
 }: {
   label: string;
   color: string;
   amount: number;
+  currency: CurrencyCode;
   active: boolean;
   onClick: () => void;
 }) {
@@ -606,7 +783,7 @@ function CategoryChip({
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} aria-hidden />
       {label}
-      <span className="text-gray-400">{formatWon(amount)}</span>
+      <span className="text-gray-400">{formatMoney(amount, currency)}</span>
     </button>
   );
 }
@@ -745,6 +922,35 @@ function todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Amount field in the selected project's currency; for foreign currencies the
+// KRW equivalent is shown live beside it.
+function AmountInput({ currency, defaultValue }: { currency: CurrencyCode; defaultValue?: number }) {
+  const rates = useContext(RatesContext);
+  const [value, setValue] = useState(defaultValue !== undefined ? String(defaultValue) : "");
+  const hint = value === "" ? null : krwHint(Number(value), currency, rates);
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        name="amount"
+        type="number"
+        min={0}
+        step={amountStep(currency)}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={`비용(${CURRENCIES[currency].unit}) *`}
+        required
+        className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+      />
+      {currency !== "KRW" && (
+        <span className="shrink-0 text-xs text-gray-500">
+          {hint ?? `1 ${CURRENCIES[currency].unit} = ${formatRate(rates[currency])}원`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ExpenseForm({
   year,
   month,
@@ -824,15 +1030,7 @@ function ExpenseForm({
         rows={2}
         className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
       />
-      <input
-        name="amount"
-        type="number"
-        min={0}
-        step={1000}
-        placeholder="비용(원) *"
-        required
-        className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
-      />
+      <AmountInput currency={projects.find((p) => p.id === selectedProjectId)?.currency ?? "KRW"} />
       <textarea
         name="note"
         placeholder="비고 (선택)"
@@ -877,6 +1075,7 @@ function ExpenseTable({
   categories: CategoryVM[];
   onEdit: (id: string) => void;
 }) {
+  const rates = useContext(RatesContext);
   const [, startTransition] = useTransition();
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
@@ -935,7 +1134,10 @@ function ExpenseTable({
                   {e.note && <p className="mt-0.5 text-xs text-gray-500">{e.note}</p>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-gray-900">
-                  {formatWon(e.amount)}
+                  {formatMoney(e.amount, project?.currency ?? "KRW")}
+                  {project && project.currency !== "KRW" && (
+                    <p className="text-xs font-normal text-gray-400">{krwHint(e.amount, project.currency, rates)}</p>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-900">{e.paymentMethod}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -1046,14 +1248,9 @@ function ExpenseEditModal({
           rows={2}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
         />
-        <input
-          name="amount"
-          type="number"
-          min={0}
-          step={1000}
+        <AmountInput
+          currency={projects.find((p) => p.id === selectedProjectId)?.currency ?? "KRW"}
           defaultValue={expense.amount}
-          required
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
         />
         <textarea
           name="note"
