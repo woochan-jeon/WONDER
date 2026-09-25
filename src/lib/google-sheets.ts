@@ -4,6 +4,7 @@ import { getAuthorizedClient } from "@/lib/google-calendar";
 import { prisma } from "@/lib/prisma";
 import { toDateKey } from "@/lib/calendar-grid";
 import { isCurrencyCode } from "@/lib/currency";
+import { EXPENSE_KIND_LABELS, EXPENSE_KIND_PAYMENT_METHOD, expenseKindFromLabel } from "@/lib/marketing-expense-kind";
 import type { MarketingCategory, MarketingExpense, MarketingProject } from "@/generated/prisma/client";
 
 /**
@@ -50,6 +51,11 @@ const EXPENSES_HEADER = [
   "금액",
   "결제수단",
   "메모",
+  // Appended after the original columns so older sheets keep their layout.
+  "유형(현금성/매출차감형/현물)",
+  "현물 품목",
+  "현물 수량",
+  "현물 개당 원가",
 ];
 
 const TABS = [
@@ -245,9 +251,18 @@ async function reconcileExpenses(rows: string[][]) {
     const category = categoryName ? project.categories.find((c) => c.name === categoryName) : undefined;
     const channel = cell(row, 4);
     const description = cell(row, 5);
-    const amount = parseAmount(cell(row, 6));
-    const paymentMethod = cell(row, 7);
     const note = cell(row, 8);
+    // An in-kind row needs item, quantity and unit cost; its amount is always
+    // their product. An incomplete in-kind row is treated as a plain cash row.
+    const itemName = cell(row, 10);
+    const quantity = Number.parseInt(cell(row, 11), 10);
+    const unitCost = parseAmount(cell(row, 12));
+    let kind = expenseKindFromLabel(cell(row, 9));
+    const inKind =
+      kind === "IN_KIND" && !!itemName && Number.isInteger(quantity) && quantity > 0 && Number.isFinite(unitCost);
+    if (kind === "IN_KIND" && !inKind) kind = "CASH";
+    const amount = inKind ? quantity * unitCost : parseAmount(cell(row, 6));
+    const paymentMethod = EXPENSE_KIND_PAYMENT_METHOD[kind] ?? cell(row, 7);
     if (!channel || !description || !Number.isFinite(amount) || !paymentMethod) continue;
 
     const data = {
@@ -259,6 +274,10 @@ async function reconcileExpenses(rows: string[][]) {
       amount,
       paymentMethod,
       note: note || null,
+      kind,
+      itemName: inKind ? itemName : null,
+      quantity: inKind ? quantity : null,
+      unitCost: inKind ? unitCost : null,
     };
 
     if (id && byId.has(id)) {
@@ -271,7 +290,11 @@ async function reconcileExpenses(rows: string[][]) {
         current.description !== data.description ||
         current.amount !== data.amount ||
         current.paymentMethod !== data.paymentMethod ||
-        (current.note ?? "") !== (data.note ?? "");
+        (current.note ?? "") !== (data.note ?? "") ||
+        current.kind !== data.kind ||
+        current.itemName !== data.itemName ||
+        current.quantity !== data.quantity ||
+        current.unitCost !== data.unitCost;
       if (changed) {
         await prisma.marketingExpense.update({ where: { id }, data }).catch(() => {});
       }
@@ -322,6 +345,10 @@ function expenseRows(
     String(e.amount),
     e.paymentMethod,
     e.note ?? "",
+    EXPENSE_KIND_LABELS[e.kind],
+    e.itemName ?? "",
+    e.quantity != null ? String(e.quantity) : "",
+    e.unitCost != null ? String(e.unitCost) : "",
   ]);
 }
 

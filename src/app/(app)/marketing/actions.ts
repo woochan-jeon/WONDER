@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { syncMarketingSheet } from "@/lib/google-sheets";
 import { CURRENCIES, CURRENCY_CODES, FOREIGN_CURRENCIES, toCurrencyCode } from "@/lib/currency";
+import { EXPENSE_KINDS, EXPENSE_KIND_PAYMENT_METHOD, type ExpenseKind } from "@/lib/marketing-expense-kind";
 
 export type ActionState = { error?: string };
 
@@ -165,85 +166,130 @@ export async function setBudgetAction(_prevState: ActionState, formData: FormDat
   return {};
 }
 
-const expenseSchema = z.object({
+const expenseBaseSchema = z.object({
   projectId: z.string().min(1, "프로젝트를 선택해 주세요"),
   categoryId: z.string().trim().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "날짜를 선택해 주세요"),
   channel: z.string().trim().min(1, "채널을 입력해 주세요").max(60),
   description: z.string().trim().min(1, "어떤 마케팅인지 입력해 주세요").max(500),
-  amount: z.coerce.number().min(0, "0 이상의 금액을 입력해 주세요"),
-  paymentMethod: z.string().trim().min(1, "지출 방식을 입력해 주세요").max(60),
   note: z.string().trim().max(1000).optional(),
 });
+
+const cashExpenseSchema = expenseBaseSchema.extend({
+  kind: z.literal("CASH"),
+  amount: z.coerce.number().min(0, "0 이상의 금액을 입력해 주세요"),
+  paymentMethod: z.string().trim().min(1, "지출 방식을 입력해 주세요").max(60),
+});
+
+// Non-cash cost (e.g. product samples given away), valued at cost: the
+// amount is always quantity × unit cost, computed here rather than trusted
+// from the form.
+// Commission/voucher costs taken out of sales at settlement — record once
+// the settled amount is known. No payment method: nothing is paid out.
+const salesDeductionExpenseSchema = expenseBaseSchema.extend({
+  kind: z.literal("SALES_DEDUCTION"),
+  amount: z.coerce.number().min(0, "0 이상의 금액을 입력해 주세요"),
+});
+
+const inKindExpenseSchema = expenseBaseSchema.extend({
+  kind: z.literal("IN_KIND"),
+  itemName: z.string().trim().min(1, "품목을 입력해 주세요").max(100),
+  quantity: z.coerce.number().int("수량은 정수로 입력해 주세요").min(1, "수량은 1 이상이어야 합니다"),
+  unitCost: z.coerce.number().min(0, "0 이상의 원가를 입력해 주세요"),
+});
+
+const expenseSchema = z.discriminatedUnion("kind", [
+  cashExpenseSchema,
+  salesDeductionExpenseSchema,
+  inKindExpenseSchema,
+]);
+
+function readExpenseForm(formData: FormData) {
+  return {
+    kind: EXPENSE_KINDS.includes(formData.get("kind") as ExpenseKind) ? formData.get("kind") : "CASH",
+    projectId: formData.get("projectId"),
+    categoryId: formData.get("categoryId") || undefined,
+    date: formData.get("date"),
+    channel: formData.get("channel"),
+    description: formData.get("description"),
+    amount: formData.get("amount"),
+    paymentMethod: formData.get("paymentMethod"),
+    itemName: formData.get("itemName"),
+    quantity: formData.get("quantity"),
+    unitCost: formData.get("unitCost"),
+    note: formData.get("note") || undefined,
+  };
+}
+
+async function toExpenseData(parsed: z.infer<typeof expenseSchema>) {
+  const { projectId, categoryId, date, channel, description, note } = parsed;
+  const base = {
+    projectId,
+    categoryId: categoryId || null,
+    date: new Date(`${date}T00:00:00`),
+    channel,
+    description,
+    note: note || null,
+  };
+  if (parsed.kind === "CASH") {
+    return {
+      ...base,
+      kind: "CASH" as const,
+      amount: await roundForProject(projectId, parsed.amount),
+      paymentMethod: parsed.paymentMethod,
+      itemName: null,
+      quantity: null,
+      unitCost: null,
+    };
+  }
+  if (parsed.kind === "SALES_DEDUCTION") {
+    return {
+      ...base,
+      kind: "SALES_DEDUCTION" as const,
+      amount: await roundForProject(projectId, parsed.amount),
+      paymentMethod: EXPENSE_KIND_PAYMENT_METHOD.SALES_DEDUCTION!,
+      itemName: null,
+      quantity: null,
+      unitCost: null,
+    };
+  }
+  const unitCost = await roundForProject(projectId, parsed.unitCost);
+  return {
+    ...base,
+    kind: "IN_KIND" as const,
+    amount: await roundForProject(projectId, unitCost * parsed.quantity),
+    paymentMethod: EXPENSE_KIND_PAYMENT_METHOD.IN_KIND!,
+    itemName: parsed.itemName,
+    quantity: parsed.quantity,
+    unitCost,
+  };
+}
 
 export async function createExpenseAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = expenseSchema.safeParse({
-    projectId: formData.get("projectId"),
-    categoryId: formData.get("categoryId") || undefined,
-    date: formData.get("date"),
-    channel: formData.get("channel"),
-    description: formData.get("description"),
-    amount: formData.get("amount"),
-    paymentMethod: formData.get("paymentMethod"),
-    note: formData.get("note") || undefined,
-  });
+  const parsed = expenseSchema.safeParse(readExpenseForm(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { projectId, categoryId, date, channel, description, paymentMethod, note } = parsed.data;
-  const amount = await roundForProject(projectId, parsed.data.amount);
 
-  await prisma.marketingExpense.create({
-    data: {
-      projectId,
-      categoryId: categoryId || null,
-      date: new Date(`${date}T00:00:00`),
-      channel,
-      description,
-      amount,
-      paymentMethod,
-      note: note || null,
-    },
-  });
+  await prisma.marketingExpense.create({ data: await toExpenseData(parsed.data) });
   await syncMarketingSheetQuietly();
   revalidatePath("/marketing");
   return {};
 }
 
-const updateExpenseSchema = expenseSchema.extend({ expenseId: z.string().min(1) });
-
 export async function updateExpenseAction(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const parsed = updateExpenseSchema.safeParse({
-    expenseId: formData.get("expenseId"),
-    projectId: formData.get("projectId"),
-    categoryId: formData.get("categoryId") || undefined,
-    date: formData.get("date"),
-    channel: formData.get("channel"),
-    description: formData.get("description"),
-    amount: formData.get("amount"),
-    paymentMethod: formData.get("paymentMethod"),
-    note: formData.get("note") || undefined,
-  });
+  const expenseId = String(formData.get("expenseId") ?? "");
+  if (!expenseId) return { error: "지출 항목을 찾을 수 없습니다" };
+  const parsed = expenseSchema.safeParse(readExpenseForm(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "입력값을 확인해 주세요" };
-  const { expenseId, projectId, categoryId, date, channel, description, paymentMethod, note } = parsed.data;
-  const amount = await roundForProject(projectId, parsed.data.amount);
 
   const result = await prisma.marketingExpense.updateMany({
     where: { id: expenseId },
-    data: {
-      projectId,
-      categoryId: categoryId || null,
-      date: new Date(`${date}T00:00:00`),
-      channel,
-      description,
-      amount,
-      paymentMethod,
-      note: note || null,
-    },
+    data: await toExpenseData(parsed.data),
   });
   if (result.count === 0) return { error: "지출 항목을 찾을 수 없습니다" };
   await syncMarketingSheetQuietly();

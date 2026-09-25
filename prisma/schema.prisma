@@ -219,6 +219,12 @@ model MarketingBudget {
   @@unique([projectId, categoryId, year, month])
 }
 
+enum MarketingExpenseKind {
+  CASH
+  SALES_DEDUCTION
+  IN_KIND
+}
+
 // One marketing spend line item for # 마케팅 — which channel it ran on, what
 // was done, how much it cost, and how it was paid.
 model MarketingExpense {
@@ -226,7 +232,15 @@ model MarketingExpense {
   date          DateTime
   channel       String
   description   String
-  amount        Float // in the project's currency
+  amount        Float // in the project's currency; for IN_KIND, quantity × unitCost
+  // See src/lib/marketing-expense-kind.ts: CASH = money paid out,
+  // SALES_DEDUCTION = taken out of sales at settlement, IN_KIND = non-cash
+  // cost such as product samples, valued at cost (원가). Each kind can be
+  // toggled in/out of the totals in # 마케팅.
+  kind          MarketingExpenseKind @default(CASH)
+  itemName      String? // IN_KIND only
+  quantity      Int? // IN_KIND only
+  unitCost      Float? // IN_KIND only, per-unit cost in the project's currency
   paymentMethod String
   note          String?
   createdAt     DateTime @default(now())

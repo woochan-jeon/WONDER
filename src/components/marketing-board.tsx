@@ -38,6 +38,7 @@ import {
   type ExchangeRateInfo,
   type ExchangeRates,
 } from "@/lib/currency";
+import { EXPENSE_KINDS, EXPENSE_KIND_LABELS, type ExpenseKind } from "@/lib/marketing-expense-kind";
 
 type ProjectVM = { id: string; name: string; color: string; currency: CurrencyCode };
 type CategoryVM = { id: string; name: string; color: string; projectId: string };
@@ -48,6 +49,10 @@ type ExpenseVM = {
   channel: string;
   description: string;
   amount: number;
+  kind: ExpenseKind;
+  itemName: string | null;
+  quantity: number | null;
+  unitCost: number | null;
   paymentMethod: string;
   note: string | null;
   projectId: string;
@@ -67,6 +72,14 @@ const PROJECT_COLOR_SWATCHES = [
 
 const initialState: ActionState = {};
 
+const KIND_BADGE_CLASS: Record<ExpenseKind, string> = {
+  CASH: "bg-gray-100 text-gray-700",
+  SALES_DEDUCTION: "bg-violet-50 text-violet-700",
+  IN_KIND: "bg-amber-50 text-amber-700",
+};
+
+type KindBreakdown = Partial<Record<ExpenseKind, number>>;
+
 // KRW-per-unit rates, read by every amount display for its "≈ 원" hint.
 const RatesContext = createContext<ExchangeRates>({ KRW: 1, JPY: 1, SGD: 1 });
 
@@ -80,7 +93,7 @@ export default function MarketingBoard({
   projects,
   categories,
   budgets,
-  expenses,
+  expenses: allExpenses,
   channelSuggestions,
   paymentMethodSuggestions,
   exchangeRates,
@@ -106,6 +119,26 @@ export default function MarketingBoard({
   const [managingCategories, setManagingCategories] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  // Which expense kinds count toward the totals and list. Everything by
+  // default; unchecking e.g. 매출차감형 shows only money actually paid out.
+  const [includedKinds, setIncludedKinds] = useState<ReadonlySet<ExpenseKind>>(() => new Set(EXPENSE_KINDS));
+
+  function toggleKind(kind: ExpenseKind) {
+    setIncludedKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }
+
+  const excludedCounts = EXPENSE_KINDS.filter((k) => !includedKinds.has(k))
+    .map((k) => ({ kind: k, count: allExpenses.filter((e) => e.kind === k).length }))
+    .filter((x) => x.count > 0);
+  const expenses = useMemo(
+    () => allExpenses.filter((e) => includedKinds.has(e.kind)),
+    [allExpenses, includedKinds],
+  );
 
   function selectProject(id: string | null) {
     setActiveProjectId(id);
@@ -140,6 +173,15 @@ export default function MarketingBoard({
   );
   const totalSpend = expenses.reduce((sum, e) => sum + toKrw(e.amount, currencyOf(e.projectId), rates), 0);
   const hasForeignProject = projects.some((p) => p.currency !== "KRW");
+  // Per-kind split of each total, shown as a breakdown line under the amount.
+  const totalByKind: KindBreakdown = {};
+  const byKindByProject = new Map<string, KindBreakdown>();
+  for (const e of expenses) {
+    totalByKind[e.kind] = (totalByKind[e.kind] ?? 0) + toKrw(e.amount, currencyOf(e.projectId), rates);
+    const perProject = byKindByProject.get(e.projectId) ?? {};
+    perProject[e.kind] = (perProject[e.kind] ?? 0) + e.amount;
+    byKindByProject.set(e.projectId, perProject);
+  }
   const activeCurrency = activeProjectId ? currencyOf(activeProjectId) : "KRW";
 
   const projectExpenses = activeProjectId
@@ -163,7 +205,7 @@ export default function MarketingBoard({
     ? projectExpenses.filter((e) => e.categoryId === activeCategoryId)
     : projectExpenses;
 
-  const editingExpense = editingExpenseId ? expenses.find((e) => e.id === editingExpenseId) ?? null : null;
+  const editingExpense = editingExpenseId ? allExpenses.find((e) => e.id === editingExpenseId) ?? null : null;
 
   return (
     <RatesContext.Provider value={rates}>
@@ -183,14 +225,36 @@ export default function MarketingBoard({
             </Link>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowExpenseForm((v) => !v)}
-          className="rounded-full bg-[#0066cc] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0071e3]"
-        >
-          {showExpenseForm ? "닫기" : "+ 지출 추가"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <fieldset className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm">
+            <legend className="sr-only">합계에 포함할 비용 유형</legend>
+            {EXPENSE_KINDS.map((k) => (
+              <label key={k} className="flex cursor-pointer items-center gap-1.5 text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={includedKinds.has(k)}
+                  onChange={() => toggleKind(k)}
+                  className="h-3.5 w-3.5 accent-[#0066cc]"
+                />
+                {EXPENSE_KIND_LABELS[k]}
+              </label>
+            ))}
+          </fieldset>
+          <button
+            type="button"
+            onClick={() => setShowExpenseForm((v) => !v)}
+            className="rounded-full bg-[#0066cc] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0071e3]"
+          >
+            {showExpenseForm ? "닫기" : "+ 지출 추가"}
+          </button>
+        </div>
       </div>
+
+      {excludedCounts.length > 0 && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {excludedCounts.map((x) => `${EXPENSE_KIND_LABELS[x.kind]} ${x.count}건`).join(", ")}이 합계와 목록에서 빠져 있습니다.
+        </p>
+      )}
 
       {showExpenseForm && (
         <ExpenseForm
@@ -211,6 +275,7 @@ export default function MarketingBoard({
         currency="KRW"
         budget={totalBudget}
         spend={totalSpend}
+        byKind={totalByKind}
         active={activeProjectId === null}
         onClick={() => selectProject(null)}
       />
@@ -224,6 +289,7 @@ export default function MarketingBoard({
             month={month}
             budget={budgetByProject.get(p.id) ?? null}
             spend={spendByProject.get(p.id) ?? 0}
+            byKind={byKindByProject.get(p.id) ?? {}}
             categories={categories}
             spendByCategory={spendByCategory}
             budgetByCategory={budgetByCategory}
@@ -324,6 +390,7 @@ function SummaryCard({
   currency,
   budget,
   spend,
+  byKind,
   active,
   onClick,
   children,
@@ -333,6 +400,7 @@ function SummaryCard({
   currency: CurrencyCode;
   budget: number;
   spend: number;
+  byKind?: KindBreakdown;
   active: boolean;
   onClick: () => void;
   children?: ReactNode;
@@ -369,6 +437,13 @@ function SummaryCard({
           {hasBudget && ` / ${formatMoney(toKrw(budget, currency, rates), "KRW")}`}
         </p>
       )}
+      {byKind && Object.keys(byKind).length > 1 && (
+        <p className="-mt-1 text-xs text-gray-500">
+          {EXPENSE_KINDS.filter((k) => byKind[k])
+            .map((k) => `${EXPENSE_KIND_LABELS[k]} ${formatMoney(byKind[k]!, currency)}`)
+            .join(" · ")}
+        </p>
+      )}
       {hasBudget && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
           <div
@@ -393,6 +468,7 @@ function ProjectSummary({
   month,
   budget,
   spend,
+  byKind,
   categories,
   spendByCategory,
   budgetByCategory,
@@ -404,6 +480,7 @@ function ProjectSummary({
   month: number;
   budget: number | null;
   spend: number;
+  byKind: KindBreakdown;
   categories: CategoryVM[];
   spendByCategory: Map<string, number>;
   budgetByCategory: Map<string, number>;
@@ -421,6 +498,7 @@ function ProjectSummary({
         currency={project.currency}
         budget={budget ?? 0}
         spend={spend}
+        byKind={byKind}
         active={active}
         onClick={onClick}
       >
@@ -951,6 +1029,122 @@ function AmountInput({ currency, defaultValue }: { currency: CurrencyCode; defau
   );
 }
 
+// 현금 vs 현물 cost entry. Cash takes a payment method and amount; in-kind
+// (e.g. product samples) takes item × quantity × unit cost (원가), and the
+// server stores their product as the amount.
+function CostFields({
+  currency,
+  paymentListId,
+  expense,
+}: {
+  currency: CurrencyCode;
+  paymentListId: string;
+  expense?: ExpenseVM;
+}) {
+  const rates = useContext(RatesContext);
+  const [kind, setKind] = useState<ExpenseKind>(expense?.kind ?? "CASH");
+  const [quantity, setQuantity] = useState(expense?.quantity != null ? String(expense.quantity) : "");
+  const [unitCost, setUnitCost] = useState(expense?.unitCost != null ? String(expense.unitCost) : "");
+  const total = quantity !== "" && unitCost !== "" ? Number(quantity) * Number(unitCost) : null;
+  const totalHint = total !== null && Number.isFinite(total) ? krwHint(total, currency, rates) : null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <input type="hidden" name="kind" value={kind} />
+      <div className="flex items-center gap-1 self-start rounded-md border border-gray-200 bg-white p-0.5 text-xs">
+        {(
+          [
+            ["CASH", "현금성"],
+            ["SALES_DEDUCTION", "매출차감형"],
+            ["IN_KIND", "현물 (샘플 등)"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={kind === value}
+            onClick={() => setKind(value)}
+            className={`rounded px-2.5 py-1 ${kind === value ? "bg-[#0066cc] text-white" : "text-gray-600 hover:bg-gray-50"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">
+        {kind === "CASH"
+          ? "실제로 돈이 나가는 비용 (포인트 충전, 인플루언서, 광고비 등). 포인트는 충전 시점에 기록하고, 다음 달로 이월되면 소진 기준으로 나눠 기록하세요."
+          : kind === "SALES_DEDUCTION"
+            ? "정산 때 매출에서 빠지는 비용 (AMS 수수료, 라이브 바우처 등). 정산 금액이 확정되면 기록하세요."
+            : "제품 샘플 등 현물 제공 비용. 원가 기준으로 계산됩니다."}
+      </p>
+      {kind === "SALES_DEDUCTION" ? (
+        <AmountInput
+          currency={currency}
+          defaultValue={expense?.kind === "SALES_DEDUCTION" ? expense.amount : undefined}
+        />
+      ) : kind === "CASH" ? (
+        <>
+          <input
+            name="paymentMethod"
+            list={paymentListId}
+            defaultValue={expense?.kind === "CASH" ? expense.paymentMethod : undefined}
+            placeholder="지출 방식 (예: 법인카드) *"
+            required
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+          />
+          <AmountInput currency={currency} defaultValue={expense?.kind === "CASH" ? expense.amount : undefined} />
+        </>
+      ) : (
+        <>
+          <input
+            name="itemName"
+            defaultValue={expense?.itemName ?? undefined}
+            placeholder="품목 (예: 스킨케어 샘플 세트) *"
+            required
+            maxLength={100}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              name="quantity"
+              type="number"
+              min={1}
+              step={1}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="수량 *"
+              required
+              className="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+            />
+            <span className="text-sm text-gray-400">×</span>
+            <input
+              name="unitCost"
+              type="number"
+              min={0}
+              step={amountStep(currency)}
+              value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+              placeholder={`개당 원가(${CURRENCIES[currency].unit}) *`}
+              required
+              className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
+            />
+          </div>
+          <p className="text-xs text-gray-500">
+            {total !== null && Number.isFinite(total) ? (
+              <>
+                합계 <span className="font-medium text-gray-900">{formatMoney(total, currency)}</span>
+                {totalHint && ` (${totalHint})`} · 원가 기준
+              </>
+            ) : (
+              "수량과 개당 원가를 입력하면 합계가 자동 계산됩니다 (원가 기준)."
+            )}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ExpenseForm({
   year,
   month,
@@ -1015,13 +1209,6 @@ function ExpenseForm({
           required
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
         />
-        <input
-          name="paymentMethod"
-          list="marketing-payment-suggestions"
-          placeholder="지출 방식 (예: 법인카드) *"
-          required
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
-        />
       </div>
       <textarea
         name="description"
@@ -1030,7 +1217,10 @@ function ExpenseForm({
         rows={2}
         className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
       />
-      <AmountInput currency={projects.find((p) => p.id === selectedProjectId)?.currency ?? "KRW"} />
+      <CostFields
+        currency={projects.find((p) => p.id === selectedProjectId)?.currency ?? "KRW"}
+        paymentListId="marketing-payment-suggestions"
+      />
       <textarea
         name="note"
         placeholder="비고 (선택)"
@@ -1131,6 +1321,12 @@ function ExpenseTable({
                 <td className="px-3 py-2 text-gray-900">{e.channel}</td>
                 <td className="max-w-xs px-3 py-2 text-gray-900">
                   <p>{e.description}</p>
+                  {e.kind === "IN_KIND" && e.itemName && (
+                    <p className="mt-0.5 text-xs text-gray-600">
+                      {e.itemName} × {e.quantity?.toLocaleString("ko-KR")}개
+                      {e.unitCost != null && ` (개당 ${formatMoney(e.unitCost, project?.currency ?? "KRW")})`}
+                    </p>
+                  )}
                   {e.note && <p className="mt-0.5 text-xs text-gray-500">{e.note}</p>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-gray-900">
@@ -1139,7 +1335,15 @@ function ExpenseTable({
                     <p className="text-xs font-normal text-gray-400">{krwHint(e.amount, project.currency, rates)}</p>
                   )}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-gray-900">{e.paymentMethod}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                  {e.kind === "CASH" ? (
+                    e.paymentMethod
+                  ) : (
+                    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${KIND_BADGE_CLASS[e.kind]}`}>
+                      {EXPENSE_KIND_LABELS[e.kind]}
+                    </span>
+                  )}
+                </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right">
                   <button
                     onClick={() => onEdit(e.id)}
@@ -1233,13 +1437,6 @@ function ExpenseEditModal({
             required
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
           />
-          <input
-            name="paymentMethod"
-            list="marketing-payment-suggestions-edit"
-            defaultValue={expense.paymentMethod}
-            required
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
-          />
         </div>
         <textarea
           name="description"
@@ -1248,9 +1445,10 @@ function ExpenseEditModal({
           rows={2}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#0066cc] focus:ring-1 focus:ring-[#0066cc]"
         />
-        <AmountInput
+        <CostFields
           currency={projects.find((p) => p.id === selectedProjectId)?.currency ?? "KRW"}
-          defaultValue={expense.amount}
+          paymentListId="marketing-payment-suggestions-edit"
+          expense={expense}
         />
         <textarea
           name="note"
