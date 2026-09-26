@@ -306,10 +306,11 @@ model CertMember {
 
   // 소속팀 성과, pick one: export (contract + US$2,000) or e-commerce
   // practice (a product listed & sold + a marketing analysis report).
-  teamExportContract Boolean @default(false) // 계약체결 1건 이상
-  teamExportAmount   Boolean @default(false) // 수출실적 US$2,000 이상
-  teamEcomSale       Boolean @default(false) // 상품 등록 및 판매 1건 이상
-  teamEcomReport     Boolean @default(false) // 마케팅 분석보고서 1건 이상
+  // Checked by default — uncheck an item to flag a gap.
+  teamExportContract Boolean @default(true) // 계약체결 1건 이상
+  teamExportAmount   Boolean @default(true) // 수출실적 US$2,000 이상
+  teamEcomSale       Boolean @default(true) // 상품 등록 및 판매 1건 이상
+  teamEcomReport     Boolean @default(true) // 마케팅 분석보고서 1건 이상
 
   certCustomsBroker1 Boolean @default(false) // 관세사 1차 (path A, pick one)
   certGukmusa1      Boolean @default(false) // 국제무역사 1급 (path A, pick one)
