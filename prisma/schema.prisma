@@ -283,19 +283,39 @@ model MeetingSummary {
 // A person tracked in # 장관인증요건. Like WorkLogMember this is just a name
 // registry (no accounts); the simple yes/no conditions live on the row itself.
 // GPA is stored only as "met or not" — the actual grade is deliberately never
-// collected.
+// collected (the in-page GPA calculator doesn't save its inputs either).
 model CertMember {
   id        String   @id @default(cuid())
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  gpaOk           Boolean   @default(false)
-  gpaCheckedAt    DateTime?
-  // 시장진출보고서 — everyone has submitted it by default.
+  // GPA is met by either route: cumulative (all semesters) ≥ 3.7, or the
+  // current semester (1학기 or 2학기) alone ≥ 4.1.
+  gpaOk                Boolean   @default(false) // cumulative route
+  gpaCheckedAt         DateTime?
+  gpaSemesterOk        Boolean   @default(false) // current-semester route
+  gpaSemesterCheckedAt DateTime?
+  // GTEP 프로그램 수료. The 80h personal exhibition log (CertExhibition) is
+  // one of its requirements and is shown as progress toward it.
+  gtepCompleted   Boolean   @default(false)
+  gtepCompletedAt DateTime?
+
+  // 협력업체 특화지역 시장진출보고서 — everyone has submitted it by default.
   reportSubmitted Boolean   @default(true)
 
-  certGukmusa1      Boolean @default(false) // 국제무역사 1급 (path A)
+  // 소속팀 성과, pick one: export (contract + US$2,000) or e-commerce
+  // practice (a product listed & sold + a marketing analysis report).
+  teamExportContract Boolean @default(false) // 계약체결 1건 이상
+  teamExportAmount   Boolean @default(false) // 수출실적 US$2,000 이상
+  teamEcomSale       Boolean @default(false) // 상품 등록 및 판매 1건 이상
+  teamEcomReport     Boolean @default(false) // 마케팅 분석보고서 1건 이상
+
+  certCustomsBroker1 Boolean @default(false) // 관세사 1차 (path A, pick one)
+  certGukmusa1      Boolean @default(false) // 국제무역사 1급 (path A, pick one)
+  certForexManager  Boolean @default(false) // 외환관리사 (path A, pick one)
+  certFtaOrigin     Boolean @default(false) // FTA 원산지관리사 (path A, pick one)
+  certBondedAgent   Boolean @default(false) // 보세사 (path A, pick one)
   certTradeEnglish1 Boolean @default(false) // 무역영어 1급 (path B, required)
   certLogistics     Boolean @default(false) // 물류관리사 (path B, pick one)
   certDistribution1 Boolean @default(false) // 유통관리사 1급 (path B, pick one)

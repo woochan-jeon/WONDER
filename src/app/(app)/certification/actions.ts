@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { CERT_FIELDS, getExam, validateLangScore } from "@/lib/minister-cert";
+import { CERT_FIELDS, TEAM_FIELDS, getExam, validateLangScore } from "@/lib/minister-cert";
 
 export type ActionState = { error?: string; createdId?: string };
 
@@ -30,20 +30,35 @@ export async function deleteMemberAction(memberId: string) {
 
 const flagsSchema = z
   .object({
+    gtepCompleted: z.boolean(),
     gpaOk: z.boolean(),
+    gpaSemesterOk: z.boolean(),
     reportSubmitted: z.boolean(),
-    ...Object.fromEntries(CERT_FIELDS.map((f) => [f, z.boolean()])),
+    ...Object.fromEntries([...CERT_FIELDS, ...TEAM_FIELDS].map((f) => [f, z.boolean()])),
   })
   .partial()
   .strict();
 
-export type MemberFlagsPatch = Partial<Record<"gpaOk" | "reportSubmitted" | (typeof CERT_FIELDS)[number], boolean>>;
+export type MemberFlagsPatch = Partial<
+  Record<
+    | "gtepCompleted"
+    | "gpaOk"
+    | "gpaSemesterOk"
+    | "reportSubmitted"
+    | (typeof CERT_FIELDS)[number]
+    | (typeof TEAM_FIELDS)[number],
+    boolean
+  >
+>;
 
 export async function updateMemberFlagsAction(memberId: string, patch: MemberFlagsPatch) {
   const parsed = flagsSchema.safeParse(patch);
   if (!parsed.success) return;
   const data: Record<string, boolean | Date | null> = { ...parsed.data };
+  if (parsed.data.gtepCompleted !== undefined) data.gtepCompletedAt = parsed.data.gtepCompleted ? new Date() : null;
   if (parsed.data.gpaOk !== undefined) data.gpaCheckedAt = parsed.data.gpaOk ? new Date() : null;
+  if (parsed.data.gpaSemesterOk !== undefined)
+    data.gpaSemesterCheckedAt = parsed.data.gpaSemesterOk ? new Date() : null;
   await prisma.certMember.updateMany({ where: { id: memberId }, data });
   revalidatePath("/certification");
 }

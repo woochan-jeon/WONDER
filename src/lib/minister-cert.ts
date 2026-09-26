@@ -18,6 +18,48 @@ export const MERGE_POLICY: "low" | "high" = "low";
 export const EXHIBITION_REQUIRED_HOURS = 80;
 
 // ---------------------------------------------------------------------------
+// GPA (4.5 scale): met by either the cumulative GPA over all semesters, or
+// the current semester's (1학기 or 2학기) GPA on its own.
+
+export const GPA_MAX = 4.5;
+export const GPA_CUMULATIVE_MIN = 3.7;
+export const GPA_SEMESTER_MIN = 4.1;
+
+export type GpaPlan =
+  | { kind: "invalid"; message: string }
+  /** Cumulative GPA already clears the bar. */
+  | { kind: "met"; current: number }
+  /** Average needed over the upcoming credits to bring the cumulative GPA up to the bar. */
+  | { kind: "reachable"; needed: number; easierThanSemester: boolean }
+  /** The cumulative bar can't be reached with these credits even at 4.5. */
+  | { kind: "unreachable"; best: number };
+
+/**
+ * Given the current cumulative GPA over `creditsDone` credits, what average
+ * the next `creditsAhead` credits need for the cumulative GPA to reach
+ * GPA_CUMULATIVE_MIN. The needed average is rounded *up* to 2 decimals so
+ * hitting it exactly is always enough.
+ */
+export function planGpa(currentGpa: number, creditsDone: number, creditsAhead: number): GpaPlan {
+  if (!Number.isFinite(currentGpa) || currentGpa < 0 || currentGpa > GPA_MAX)
+    return { kind: "invalid", message: `현재 평점은 0~${GPA_MAX} 사이로 입력해 주세요` };
+  if (!Number.isFinite(creditsDone) || creditsDone <= 0)
+    return { kind: "invalid", message: "지금까지 이수한 학점을 입력해 주세요" };
+  if (currentGpa >= GPA_CUMULATIVE_MIN) return { kind: "met", current: currentGpa };
+  if (!Number.isFinite(creditsAhead) || creditsAhead <= 0)
+    return { kind: "invalid", message: "앞으로 이수할 학점을 입력해 주세요" };
+
+  const exactNeeded = (GPA_CUMULATIVE_MIN * (creditsDone + creditsAhead) - currentGpa * creditsDone) / creditsAhead;
+  // Nudge before ceil so float noise like 3.9000000001 doesn't round up to 3.91.
+  const needed = Math.ceil(exactNeeded * 100 - 1e-9) / 100;
+  if (needed > GPA_MAX) {
+    const best = (currentGpa * creditsDone + GPA_MAX * creditsAhead) / (creditsDone + creditsAhead);
+    return { kind: "unreachable", best: Math.floor(best * 100) / 100 };
+  }
+  return { kind: "reachable", needed, easierThanSemester: needed < GPA_SEMESTER_MIN };
+}
+
+// ---------------------------------------------------------------------------
 // Conversion table
 
 interface Band {
@@ -459,7 +501,11 @@ export function langNextGoal(input: LangScoreInput, verdict: LangVerdict): strin
 // Certificates
 
 export const CERT_FIELDS = [
+  "certCustomsBroker1",
   "certGukmusa1",
+  "certForexManager",
+  "certFtaOrigin",
+  "certBondedAgent",
   "certTradeEnglish1",
   "certLogistics",
   "certDistribution1",
@@ -469,7 +515,11 @@ export const CERT_FIELDS = [
 export type CertField = (typeof CERT_FIELDS)[number];
 
 export const CERT_LABELS: Record<CertField, string> = {
+  certCustomsBroker1: "관세사 (1차)",
   certGukmusa1: "국제무역사 1급",
+  certForexManager: "외환관리사",
+  certFtaOrigin: "FTA 원산지관리사",
+  certBondedAgent: "보세사",
   certTradeEnglish1: "무역영어 1급",
   certLogistics: "물류관리사",
   certDistribution1: "유통관리사 1급",
@@ -477,6 +527,16 @@ export const CERT_LABELS: Record<CertField, string> = {
   certImportManager: "수입관리사",
 };
 
+/** 무역자격증 ①: any one of these alone is enough. */
+export const CERT_PATH_A_CHOICES: CertField[] = [
+  "certCustomsBroker1",
+  "certGukmusa1",
+  "certForexManager",
+  "certFtaOrigin",
+  "certBondedAgent",
+];
+
+/** 무역자격증 ②: 무역영어 1급 plus one of these ("기타 자격증 등"; 유통관리사 1급 counts too). */
 export const CERT_PATH_B_CHOICES: CertField[] = [
   "certLogistics",
   "certDistribution1",
@@ -484,9 +544,9 @@ export const CERT_PATH_B_CHOICES: CertField[] = [
   "certImportManager",
 ];
 
-/** 경로A = 국제무역사 1급; 경로B = 무역영어 1급 + (물류/유통 1·2급/수입 중 1개). */
+/** ① = 관세사(1차)/국제무역사 1급/외환관리사/FTA 원산지관리사/보세사 중 택1; ② = 무역영어 1급 + 기타 자격증 1개. */
 export function judgeCerts(flags: Record<CertField, boolean>) {
-  const pathA = flags.certGukmusa1 ? 1 : 0;
+  const pathA = CERT_PATH_A_CHOICES.some((f) => flags[f]) ? 1 : 0;
   const hasChoice = CERT_PATH_B_CHOICES.some((f) => flags[f]);
   const pathB = (flags.certTradeEnglish1 ? 1 : 0) + (hasChoice ? 1 : 0);
   const aMet = pathA === 1;
@@ -498,4 +558,30 @@ export function judgeCerts(flags: Record<CertField, boolean>) {
     else pathBRemaining = "택1 자격증 1개 필요";
   }
   return { met: aMet || bMet, pathA, pathB, aMet, bMet, pathBRemaining };
+}
+
+// ---------------------------------------------------------------------------
+// 소속팀 성과 (pick one of two tracks, each needing both of its items)
+
+export const TEAM_FIELDS = ["teamExportContract", "teamExportAmount", "teamEcomSale", "teamEcomReport"] as const;
+export type TeamField = (typeof TEAM_FIELDS)[number];
+
+export const TEAM_TRACKS: { title: string; fields: [TeamField, TeamField] }[] = [
+  { title: "소속팀 수출실적", fields: ["teamExportContract", "teamExportAmount"] },
+  { title: "소속팀 전자상거래 실습성과", fields: ["teamEcomSale", "teamEcomReport"] },
+];
+
+export const TEAM_LABELS: Record<TeamField, string> = {
+  teamExportContract: "계약체결 1건 이상",
+  teamExportAmount: "수출실적 US$2,000 이상",
+  teamEcomSale: "상품 등록 및 판매 1건 이상",
+  teamEcomReport: "마케팅 분석보고서 1건 이상 작성",
+};
+
+export function judgeTeam(flags: Record<TeamField, boolean>) {
+  const tracks = TEAM_TRACKS.map((t) => {
+    const done = t.fields.filter((f) => flags[f]).length;
+    return { ...t, done, met: done === t.fields.length };
+  });
+  return { met: tracks.some((t) => t.met), tracks };
 }

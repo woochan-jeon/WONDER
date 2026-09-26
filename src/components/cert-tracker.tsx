@@ -15,19 +15,27 @@ import {
 } from "@/app/(app)/certification/actions";
 import {
   CERT_LABELS,
+  CERT_PATH_A_CHOICES,
   CERT_PATH_B_CHOICES,
   EXAMS,
   EXAM_LANGUAGES,
   EXHIBITION_REQUIRED_HOURS,
+  GPA_CUMULATIVE_MIN,
+  GPA_MAX,
+  GPA_SEMESTER_MIN,
   examInputs,
   getExam,
   judgeCerts,
   judgeLangScore,
+  judgeTeam,
   langNextGoal,
   levelNeedsScore,
   pickBestScore,
+  TEAM_LABELS,
+  planGpa,
   type CertField,
   type LangStatus,
+  type TeamField,
 } from "@/lib/minister-cert";
 import { WORKLOG_MEMBER_CANDIDATES } from "@/lib/worklog-roster";
 
@@ -47,17 +55,27 @@ interface ExhibitionVM {
   hours: number;
 }
 
-interface MemberVM extends Record<CertField, boolean> {
+interface MemberVM extends Record<CertField | TeamField, boolean> {
   id: string;
   name: string;
+  gtepCompleted: boolean;
   gpaOk: boolean;
   gpaCheckedAt: string | null; // YYYY-MM-DD
+  gpaSemesterOk: boolean;
+  gpaSemesterCheckedAt: string | null; // YYYY-MM-DD
   reportSubmitted: boolean;
   langScores: LangScoreVM[];
   exhibitions: ExhibitionVM[];
 }
 
 type Status = "pass" | "boundary" | "fail" | "unknown";
+
+interface ConditionInfo {
+  id: string;
+  label: string;
+  status: Status;
+  badge: string;
+}
 
 const CURRENT_MEMBER_KEY = "wonder:cert:currentMemberId";
 const initialState: ActionState = {};
@@ -220,37 +238,47 @@ function MemberView({ member: serverMember }: { member: MemberVM }) {
   );
   const best = pickBestScore(scored);
   const certs = judgeCerts(member);
+  const team = judgeTeam(member);
   const totalHours = member.exhibitions.reduce((sum, e) => sum + e.hours, 0);
+  const gpaMet = member.gpaOk || member.gpaSemesterOk;
 
   const langStatus: { status: Status; label: string } = best
     ? LANG_STATUS[best.verdict.status]
     : { status: "fail", label: "미충족" };
 
-  const conditions: { id: string; label: string; status: Status; badge: string }[] = [
-    {
-      id: "cert-gpa",
-      label: "학점",
-      status: member.gpaOk ? "pass" : "unknown",
-      badge: member.gpaOk ? "충족" : "미확인",
+  // Same order as the 사업단 criteria table: 공통 5 (수료·학점·외국어·보고서·팀 성과) + 선택 (무역자격증).
+  const conditions: Record<"gtep" | "gpa" | "lang" | "report" | "team" | "license", ConditionInfo> = {
+    gtep: {
+      id: "cert-gtep",
+      label: "수료",
+      status: member.gtepCompleted ? "pass" : "fail",
+      badge: member.gtepCompleted ? "수료" : "미수료",
     },
-    { id: "cert-lang", label: "어학", status: langStatus.status, badge: langStatus.label },
-    {
+    gpa: { id: "cert-gpa", label: "학점", status: gpaMet ? "pass" : "unknown", badge: gpaMet ? "충족" : "미확인" },
+    lang: { id: "cert-lang", label: "외국어", status: langStatus.status, badge: langStatus.label },
+    report: {
       id: "cert-report",
       label: "보고서",
       status: member.reportSubmitted ? "pass" : "fail",
       badge: member.reportSubmitted ? "충족" : "미제출",
     },
-    { id: "cert-license", label: "자격증", status: certs.met ? "pass" : "fail", badge: certs.met ? "충족" : "미충족" },
-    {
-      id: "cert-expo",
-      label: "전시회",
-      status: totalHours >= EXHIBITION_REQUIRED_HOURS ? "pass" : "fail",
-      badge: totalHours >= EXHIBITION_REQUIRED_HOURS ? "충족" : "미충족",
+    team: {
+      id: "cert-team",
+      label: "팀 성과",
+      status: team.met ? "pass" : "fail",
+      badge: team.met ? "충족" : "미충족",
     },
-  ];
+    license: {
+      id: "cert-license",
+      label: "무역자격증",
+      status: certs.met ? "pass" : "fail",
+      badge: certs.met ? "충족" : "미충족",
+    },
+  };
+  const conditionList = Object.values(conditions);
   // Only a clean pass counts — 경계/미확인/확인 필요 all count as not met.
-  const metCount = conditions.filter((c) => c.status === "pass").length;
-  const allMet = metCount === conditions.length;
+  const metCount = conditionList.filter((c) => c.status === "pass").length;
+  const allMet = metCount === conditionList.length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -259,7 +287,7 @@ function MemberView({ member: serverMember }: { member: MemberVM }) {
           <h2 className="text-base font-semibold text-gray-900">
             {member.name} · 장관인증{" "}
             <span className={allMet ? "text-emerald-700" : "text-gray-900"}>
-              {metCount} / {conditions.length}
+              {metCount} / {conditionList.length}
             </span>{" "}
             충족
           </h2>
@@ -270,7 +298,7 @@ function MemberView({ member: serverMember }: { member: MemberVM }) {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {conditions.map((c) => (
+          {conditionList.map((c) => (
             <button
               key={c.id}
               type="button"
@@ -285,61 +313,74 @@ function MemberView({ member: serverMember }: { member: MemberVM }) {
         </div>
       </section>
 
-      <ConditionCard id="cert-gpa" index={1} title="학점" status={conditions[0].status} badge={conditions[0].badge}>
-        <CheckRow checked={member.gpaOk} onChange={(v) => setFlags({ gpaOk: v })}>
-          학점 3.7 이상 (4.5 만점) 충족
+      <ConditionCard index={1} title="GTEP 프로그램 수료" condition={conditions.gtep}>
+        <CheckRow checked={member.gtepCompleted} onChange={(v) => setFlags({ gtepCompleted: v })}>
+          GTEP 프로그램 수료
         </CheckRow>
-        {member.gpaOk && member.gpaCheckedAt && (
-          <p className="pl-7 text-xs text-gray-500">{shortDate(member.gpaCheckedAt)} 확인</p>
+        {!member.gtepCompleted && totalHours >= EXHIBITION_REQUIRED_HOURS && (
+          <p className="pl-7 text-xs text-emerald-700">
+            전시회 {EXHIBITION_REQUIRED_HOURS}시간 요건을 채웠어요. 수료가 확정되면 체크해 주세요.
+          </p>
         )}
+        <div className="flex flex-col gap-3 border-t border-gray-100 pt-3">
+          <p className="text-xs font-semibold text-gray-500">수료요건 · 개인 전시회 {EXHIBITION_REQUIRED_HOURS}시간</p>
+          <ExhibitionSection memberId={member.id} exhibitions={member.exhibitions} totalHours={totalHours} />
+        </div>
       </ConditionCard>
 
-      <ConditionCard id="cert-lang" index={2} title="어학" status={langStatus.status} badge={langStatus.label}>
+      <ConditionCard index={2} title="학업 성적" condition={conditions.gpa}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-gray-500">아래 중 하나만 충족하면 됩니다 (4.5 만점).</p>
+            <CheckRow checked={member.gpaOk} onChange={(v) => setFlags({ gpaOk: v })}>
+              전체학기 누적 평점 {GPA_CUMULATIVE_MIN} 이상
+            </CheckRow>
+            {member.gpaOk && member.gpaCheckedAt && (
+              <p className="-mt-1 pl-7 text-xs text-gray-500">{shortDate(member.gpaCheckedAt)} 확인</p>
+            )}
+            <p className="pl-7 text-xs text-gray-400">또는</p>
+            <CheckRow checked={member.gpaSemesterOk} onChange={(v) => setFlags({ gpaSemesterOk: v })}>
+              GTEP 활동학기(1학기 또는 2학기) 평점 {GPA_SEMESTER_MIN} 이상
+            </CheckRow>
+            {member.gpaSemesterOk && member.gpaSemesterCheckedAt && (
+              <p className="-mt-1 pl-7 text-xs text-gray-500">{shortDate(member.gpaSemesterCheckedAt)} 확인</p>
+            )}
+          </div>
+          <GpaCalculator key={member.id} />
+        </div>
+      </ConditionCard>
+
+      <ConditionCard index={3} title="외국어 성적" condition={conditions.lang}>
+        <p className="-mt-1 text-xs text-gray-500">TOEIC 850 이상 (상응하는 기타 외국어 점수 인정)</p>
         <LanguageSection memberId={member.id} scored={scored} bestId={best?.id ?? null} />
       </ConditionCard>
 
-      <ConditionCard
-        id="cert-report"
-        index={3}
-        title="지역전문가 보고서"
-        status={conditions[2].status}
-        badge={conditions[2].badge}
-      >
+      <ConditionCard index={4} title="지역전문가 보고서" condition={conditions.report}>
         <CheckRow checked={member.reportSubmitted} onChange={(v) => setFlags({ reportSubmitted: v })}>
-          시장진출보고서 제출
+          협력업체 특화지역 시장진출보고서 1건 이상 작성
         </CheckRow>
       </ConditionCard>
 
-      <ConditionCard id="cert-license" index={4} title="자격증" status={conditions[3].status} badge={conditions[3].badge}>
-        <CertificateSection member={member} certs={certs} onToggle={(field, v) => setFlags({ [field]: v })} />
+      <ConditionCard index={5} title="소속팀 성과 (택1)" condition={conditions.team}>
+        <TeamSection member={member} team={team} onToggle={(field, v) => setFlags({ [field]: v })} />
       </ConditionCard>
 
-      <ConditionCard
-        id="cert-expo"
-        index={5}
-        title="개인 전시회 80시간"
-        status={conditions[4].status}
-        badge={conditions[4].badge}
-      >
-        <ExhibitionSection memberId={member.id} exhibitions={member.exhibitions} totalHours={totalHours} />
+      <ConditionCard index={6} title="무역자격증 (택1)" condition={conditions.license}>
+        <CertificateSection member={member} certs={certs} onToggle={(field, v) => setFlags({ [field]: v })} />
       </ConditionCard>
     </div>
   );
 }
 
 function ConditionCard({
-  id,
   index,
   title,
-  status,
-  badge,
+  condition: { id, status, badge },
   children,
 }: {
-  id: string;
   index: number;
   title: string;
-  status: Status;
-  badge: string;
+  condition: ConditionInfo;
   children: React.ReactNode;
 }) {
   return (
@@ -374,6 +415,102 @@ function CheckRow({
       />
       <span>{children}</span>
     </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 1. 학점 계산기 — inputs live only in component state and are never sent to
+// the server, keeping the "GPA numbers are never stored" rule.
+
+function GpaCalculator() {
+  const [gpa, setGpa] = useState("");
+  const [creditsDone, setCreditsDone] = useState("");
+  const [creditsAhead, setCreditsAhead] = useState("");
+  const filled = gpa !== "" && creditsDone !== "";
+  const plan = filled ? planGpa(Number(gpa), Number(creditsDone), creditsAhead === "" ? NaN : Number(creditsAhead)) : null;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <p className="text-xs font-semibold text-gray-700">학점 계산기</p>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="flex flex-col gap-1 text-xs text-gray-500">
+          현재 누적 평점
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={GPA_MAX}
+            step={0.01}
+            value={gpa}
+            onChange={(e) => setGpa(e.target.value)}
+            placeholder="3.55"
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-gray-500">
+          이수한 학점
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={creditsDone}
+            onChange={(e) => setCreditsDone(e.target.value)}
+            placeholder="90"
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-gray-500">
+          앞으로 이수할 학점
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1}
+            value={creditsAhead}
+            onChange={(e) => setCreditsAhead(e.target.value)}
+            placeholder="18"
+            className={`${INPUT_CLASS} w-full`}
+          />
+        </label>
+      </div>
+      <div className="text-sm">
+        {!plan ? (
+          <p className="text-xs text-gray-500">
+            현재 누적 평점과 학점을 입력하면, 누적 {GPA_CUMULATIVE_MIN}을 넘기려면 앞으로 평균 몇 점이 필요한지
+            알려드려요.
+          </p>
+        ) : plan.kind === "invalid" ? (
+          <p className="text-xs text-red-600">{plan.message}</p>
+        ) : plan.kind === "met" ? (
+          <p className="text-emerald-700">
+            누적 평점 {plan.current.toFixed(2)}로 이미 누적 기준({GPA_CUMULATIVE_MIN})을 충족합니다.
+          </p>
+        ) : plan.kind === "reachable" ? (
+          <>
+            <p className="text-gray-900">
+              앞으로 {creditsAhead}학점을 평균 <b className="text-[#0066cc]">{plan.needed.toFixed(2)}</b> 이상 받으면 누적{" "}
+              {GPA_CUMULATIVE_MIN} 달성
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {plan.easierThanSemester
+                ? `활동학기 기준(${GPA_SEMESTER_MIN})보다 낮아서 누적 기준이 더 쉬워요.`
+                : `누적 기준이 더 어려워요. GTEP 활동학기에 ${GPA_SEMESTER_MIN} 이상을 받으면 활동학기 기준으로 충족됩니다.`}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-amber-700">
+              앞으로 {creditsAhead}학점을 모두 {GPA_MAX}로 받아도 누적 {plan.best.toFixed(2)}까지라 누적 기준은 어려워요.
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              GTEP 활동학기에 {GPA_SEMESTER_MIN} 이상을 받으면 활동학기 기준으로 충족됩니다.
+            </p>
+          </>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-400">입력한 값은 저장되지 않고 이 화면에서만 계산됩니다.</p>
+    </div>
   );
 }
 
@@ -566,19 +703,21 @@ function CertificateSection({
   return (
     <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-start">
       <div className={`flex flex-1 flex-col gap-2 rounded-md border p-3 ${emphasis(certs.aMet, ratioA, ratioB)}`}>
-        <p className="text-xs font-semibold text-gray-500">경로 A</p>
-        <CheckRow checked={member.certGukmusa1} onChange={(v) => onToggle("certGukmusa1", v)}>
-          {CERT_LABELS.certGukmusa1}
-        </CheckRow>
+        <p className="text-xs font-semibold text-gray-500">무역자격증 ① · 택1</p>
+        {CERT_PATH_A_CHOICES.map((f) => (
+          <CheckRow key={f} checked={member[f]} onChange={(v) => onToggle(f, v)}>
+            {CERT_LABELS[f]}
+          </CheckRow>
+        ))}
         <p className={`text-xs ${certs.aMet ? "font-medium text-emerald-700" : "text-gray-500"}`}>{certs.pathA} / 1</p>
       </div>
       <span className="self-center text-xs text-gray-400">또는</span>
       <div className={`flex flex-1 flex-col gap-2 rounded-md border p-3 ${emphasis(certs.bMet, ratioB, ratioA)}`}>
-        <p className="text-xs font-semibold text-gray-500">경로 B</p>
+        <p className="text-xs font-semibold text-gray-500">무역자격증 ②</p>
         <CheckRow checked={member.certTradeEnglish1} onChange={(v) => onToggle("certTradeEnglish1", v)}>
           {CERT_LABELS.certTradeEnglish1}
         </CheckRow>
-        <p className="text-xs text-gray-500">택1:</p>
+        <p className="text-xs text-gray-500">+ 기타 자격증 택1:</p>
         {CERT_PATH_B_CHOICES.map((f) => (
           <CheckRow key={f} checked={member[f]} onChange={(v) => onToggle(f, v)}>
             {CERT_LABELS[f]}
@@ -593,7 +732,50 @@ function CertificateSection({
 }
 
 // ---------------------------------------------------------------------------
-// 5. 개인 전시회
+// 소속팀 성과 — two tracks, each needing both of its items; either track is enough.
+
+function TeamSection({
+  member,
+  team,
+  onToggle,
+}: {
+  member: MemberVM;
+  team: ReturnType<typeof judgeTeam>;
+  onToggle: (field: TeamField, value: boolean) => void;
+}) {
+  const [first, second] = team.tracks;
+  const emphasis = (track: (typeof team.tracks)[number], other: (typeof team.tracks)[number]) =>
+    track.met
+      ? "border-emerald-300 bg-emerald-50/60"
+      : !team.met && track.done > other.done
+        ? "border-[#0066cc]/40 bg-[#0066cc]/5"
+        : "border-gray-200";
+
+  return (
+    <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-start">
+      {[first, second].map((track, i) => (
+        <div key={track.title} className="contents">
+          {i === 1 && <span className="self-center text-xs text-gray-400">또는</span>}
+          <div className={`flex flex-1 flex-col gap-2 rounded-md border p-3 ${emphasis(track, i === 0 ? second : first)}`}>
+            <p className="text-xs font-semibold text-gray-500">{track.title}</p>
+            {track.fields.map((f) => (
+              <CheckRow key={f} checked={member[f]} onChange={(v) => onToggle(f, v)}>
+                {TEAM_LABELS[f]}
+              </CheckRow>
+            ))}
+            <p className={`text-xs ${track.met ? "font-medium text-emerald-700" : "text-gray-500"}`}>
+              {track.done} / {track.fields.length}
+              {!track.met && track.done > 0 && ` · ${TEAM_LABELS[track.fields.find((f) => !member[f])!]}만 남음`}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GTEP 수료요건 · 개인 전시회
 
 function ExhibitionSection({
   memberId,
