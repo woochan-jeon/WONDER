@@ -113,7 +113,10 @@ export async function setTaskStatusAction(taskId: string, status: string) {
   }
   await prisma.task.update({
     where: { id: taskId },
-    data: { status: status as TaskStatus },
+    data: {
+      status: status as TaskStatus,
+      completedAt: status === TaskStatus.DONE ? new Date() : null,
+    },
   });
   revalidatePath("/tasks");
 }

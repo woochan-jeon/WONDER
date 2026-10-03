@@ -25,6 +25,7 @@ type Task = {
   description: string | null;
   status: "TODO" | "IN_PROGRESS" | "DONE";
   dueDate: Date | null;
+  completedAt: Date | null;
   assignees: string[];
   category: Category | null;
   slackChannelId: string | null;
@@ -53,6 +54,16 @@ const initialState: ActionState = {};
 function formatDueDate(date: Date | null) {
   if (!date) return null;
   return new Date(date).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+}
+
+// Due today still counts as on time; overdue starts the day after.
+function isOverdue(task: Task) {
+  if (!task.dueDate || task.status === "DONE") return false;
+  // Due dates are stored as UTC midnight of the picked day, so compare calendar
+  // dates as YYYY-MM-DD strings against the viewer's local today.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return toDateInputValue(task.dueDate) < today;
 }
 
 function toDateInputValue(date: Date | null) {
@@ -320,6 +331,12 @@ export default function TaskBoard({
             <div className="flex flex-col gap-2">
               {visibleTasks
                 .filter((t) => t.status === col.status)
+                .sort((a, b) =>
+                  // Done column: most recently completed on top.
+                  col.status === "DONE"
+                    ? new Date(b.completedAt ?? 0).getTime() - new Date(a.completedAt ?? 0).getTime()
+                    : 0,
+                )
                 .map((task) => (
                   <TaskCard key={task.id} task={task} categories={categories} slackChannels={slackChannels} />
                 ))}
@@ -469,6 +486,7 @@ function TaskCard({
   const [sending, startSendTransition] = useTransition();
   const [sendError, setSendError] = useState<string | null>(null);
   const dueLabel = formatDueDate(task.dueDate);
+  const overdue = isOverdue(task);
 
   if (editing) {
     return (
@@ -482,9 +500,13 @@ function TaskCard({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <div
+      className={`flex flex-col gap-2 rounded-lg border p-3 shadow-sm ${
+        overdue ? "border-red-300 bg-red-50" : "border-gray-200 bg-white"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-gray-900">{task.title}</p>
+        <p className={`text-sm font-medium ${overdue ? "text-red-700" : "text-gray-900"}`}>{task.title}</p>
         <div className="flex shrink-0 gap-1">
           <button
             onClick={() => setEditing(true)}
@@ -548,7 +570,12 @@ function TaskCard({
           ) : (
             <span className="text-xs text-gray-900">담당자 없음</span>
           )}
-          {dueLabel && <span className="text-xs text-gray-900">· {dueLabel}</span>}
+          {dueLabel && (
+            <span className={`text-xs ${overdue ? "font-medium text-red-600" : "text-gray-900"}`}>
+              · {dueLabel}
+              {overdue && " (마감 지남)"}
+            </span>
+          )}
         </div>
 
         <select
