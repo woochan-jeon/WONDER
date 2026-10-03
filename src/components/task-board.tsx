@@ -180,9 +180,27 @@ export default function TaskBoard({
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
+  const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
+
+  // Roster first, then any free-typed names that appear on tasks.
+  const assigneeOptions = useMemo(() => {
+    const extras = new Set<string>();
+    for (const t of tasks) for (const name of t.assignees) if (!TEAM_MEMBERS.includes(name)) extras.add(name);
+    return [...TEAM_MEMBERS, ...[...extras].sort((a, b) => a.localeCompare(b, "ko"))];
+  }, [tasks]);
+
+  // Closest deadline first; tasks without a due date go last (keeping newest-first order).
   const visibleTasks = useMemo(
-    () => (activeCategoryId ? tasks.filter((t) => t.category?.id === activeCategoryId) : tasks),
-    [tasks, activeCategoryId],
+    () =>
+      tasks
+        .filter((t) => !activeCategoryId || t.category?.id === activeCategoryId)
+        .filter((t) => !activeAssignee || t.assignees.includes(activeAssignee))
+        .sort((a, b) => {
+          if (!a.dueDate) return b.dueDate ? 1 : 0;
+          if (!b.dueDate) return -1;
+          return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        }),
+    [tasks, activeCategoryId, activeAssignee],
   );
 
   return (
@@ -246,6 +264,36 @@ export default function TaskBoard({
         >
           {showCategoryForm ? "닫기" : "+ 카테고리"}
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-gray-500">담당자</span>
+        <button
+          onClick={() => setActiveAssignee(null)}
+          className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            activeAssignee === null
+              ? "border-[#0066cc] bg-[#0066cc] text-white"
+              : "border-gray-200 text-gray-900 hover:bg-gray-50"
+          }`}
+        >
+          전체
+        </button>
+        {assigneeOptions.map((name) => {
+          const active = activeAssignee === name;
+          return (
+            <button
+              key={name}
+              onClick={() => setActiveAssignee(active ? null : name)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                active
+                  ? "border-[#0066cc] bg-[#0066cc]/10 text-[#0066cc]"
+                  : "border-gray-200 text-gray-900 hover:bg-gray-50"
+              }`}
+            >
+              {name}
+            </button>
+          );
+        })}
       </div>
 
       {showCategoryForm && <NewCategoryForm onDone={() => setShowCategoryForm(false)} />}
