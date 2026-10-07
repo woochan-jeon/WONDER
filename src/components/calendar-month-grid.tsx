@@ -23,7 +23,11 @@ const EVENT_COLORS: Record<string, string> = {
 
 function formatEventTime(event: CalendarEvent) {
   if (event.allDay || !event.start) return null;
-  return new Date(event.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  return new Date(event.start).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Seoul",
+  });
 }
 
 type Segment = { event: CalendarEvent; startCol: number; span: number; lane: number };
