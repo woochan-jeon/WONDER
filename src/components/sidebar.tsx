@@ -12,6 +12,7 @@ const CHANNELS = [
   { href: "/marketing", label: "마케팅", icon: "📊" },
   { href: "/certification", label: "장관인증요건", icon: "🎖️" },
   { href: "/timestamp", label: "타임스탬프", icon: "⏱️" },
+  { href: "/margin-simulator", label: "마진 시뮬레이터", icon: "💹" },
   { href: "/drive", label: "드라이브", icon: "🗂️" },
   { href: "/minutes", label: "회의록", icon: "📝" },
   { href: "/archive", label: "회의 아카이브", icon: "🗄️" },
