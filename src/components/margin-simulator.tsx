@@ -30,7 +30,7 @@ const DEFAULT_INPUT: SimInput = {
   situation: "10.10 (10/9-10/12)",
   voucher: AUTO_VOUCHER,
   ams: "AMS 타겟 20% (최악)",
-  qty: { "메인팩 1": 1, "3팩 번들": 0, "버라이어티 단품": 1 },
+  qty: { "메인팩 1": 1, "3팩 번들": 0, "버라이어티 단품": 1, "컴플리트 세트": 0 },
 };
 
 function loadAssumptions(): Assumptions {
@@ -60,18 +60,15 @@ function readUrl(): { tab: Tab; input: SimInput } {
   const tab = TABS.some((t) => t.id === p.get("tab")) ? (p.get("tab") as Tab) : "sim";
   const amsIdx = AMS_IDS.indexOf(p.get("ams") as (typeof AMS_IDS)[number]);
   const q = (p.get("q") ?? "").split(",").map(Number);
+  // 컴플리트 세트 추가 전 링크(수량 3개)도 그대로 열린다
+  const qtyOk = (q.length === SKU_NAMES.length || q.length === SKU_NAMES.length - 1) && q.every((n) => Number.isFinite(n));
   const input: SimInput = {
     situation: p.get("sit") ?? DEFAULT_INPUT.situation,
     voucher: p.get("v") ?? DEFAULT_INPUT.voucher,
     ams: amsIdx >= 0 ? AMS_NAMES[amsIdx] : DEFAULT_INPUT.ams,
-    qty:
-      q.length === 3 && q.every((n) => Number.isFinite(n))
-        ? {
-            "메인팩 1": Math.min(20, Math.max(0, q[0])),
-            "3팩 번들": Math.min(20, Math.max(0, q[1])),
-            "버라이어티 단품": Math.min(20, Math.max(0, q[2])),
-          }
-        : DEFAULT_INPUT.qty,
+    qty: qtyOk
+      ? (Object.fromEntries(SKU_NAMES.map((n, i) => [n, Math.min(20, Math.max(0, q[i] ?? 0))])) as SimInput["qty"])
+      : DEFAULT_INPUT.qty,
   };
   return { tab, input };
 }

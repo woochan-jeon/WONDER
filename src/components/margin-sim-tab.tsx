@@ -4,11 +4,13 @@ import { useState } from "react";
 import {
   AMS_NAMES,
   AUTO_VOUCHER,
+  COMPLETE_SKU,
   NO_VOUCHER,
   SKU_NAMES,
   findSituation,
   findVoucher,
   simulate,
+  skuDiscount,
   type Assumptions,
   type Settlement,
   type SimInput,
@@ -24,7 +26,12 @@ export const AMS_SHORT: Record<string, string> = {
   "AMS 타겟 20% (최악)": "타겟 20%",
 };
 
-const SKU_SHORT: Record<SkuName, string> = { "메인팩 1": "메인팩 1", "3팩 번들": "3팩 번들", "버라이어티 단품": "버라이어티" };
+const SKU_SHORT: Record<SkuName, string> = {
+  "메인팩 1": "메인팩 1",
+  "3팩 번들": "3팩 번들",
+  "버라이어티 단품": "버라이어티",
+  "컴플리트 세트": "컴플리트",
+};
 
 type CardTarget = "combined" | SkuName;
 
@@ -46,8 +53,17 @@ export default function SimTab({
   const sit = findSituation(A, input.situation) ?? A.situations[0];
 
   const rowFor = (t: CardTarget): Settlement => (t === "combined" ? sim.combined : sim.rows[SKU_NAMES.indexOf(t)]);
-  const effectiveTarget: CardTarget = cardTarget !== "combined" && rowFor(cardTarget).pay === 0 ? "combined" : cardTarget;
+  // 고른 대상에 결제가가 없으면 한 주문, 그것도 없으면 (컴플리트 세트만 담은 경우) 컴플리트 세트
+  const effectiveTarget: CardTarget =
+    rowFor(cardTarget).pay > 0
+      ? cardTarget
+      : sim.combined.pay === 0 && rowFor(COMPLETE_SKU).pay > 0
+        ? COMPLETE_SKU
+        : "combined";
   const cardRow = rowFor(effectiveTarget);
+  const cardAms = effectiveTarget === COMPLETE_SKU ? "AMS 없음" : input.ams;
+  const campaignRows = sim.rows.filter((r) => r.sku !== COMPLETE_SKU);
+  const completeRow = sim.rows.find((r) => r.sku === COMPLETE_SKU);
 
   const appliedVoucher = sim.combined.voucher ? findVoucher(A, sim.combined.voucher) : undefined;
   const highlightVoucher = input.voucher === AUTO_VOUCHER ? (sim.combined.voucher ?? NO_VOUCHER) : input.voucher;
@@ -57,7 +73,8 @@ export default function SimTab({
   return (
     <>
       <Hint>
-        SKU별 행은 각각 따로 주문, 합계 행은 한 주문(함께 구매)으로 계산합니다. 수수료는 바우처 적용 후 결제가 기준이며, 노란 칸에 해당하는
+        SKU별 행은 각각 따로 주문, 합계 행은 한 주문(함께 구매)으로 계산합니다. 컴플리트 세트는 캠페인 미진행(상시가·AMS 0%)이고
+        샵 바우처 4종·신규·팔로우만 쓸 수 있으며 별도 주문으로만 계산합니다. 수수료는 바우처 적용 후 결제가 기준이며, 노란 칸에 해당하는
         왼쪽 입력값만 바꾸면 모든 표가 즉시 다시 계산됩니다.
       </Hint>
       <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -109,7 +126,8 @@ export default function SimTab({
                   <div key={sku.name} className="flex items-center justify-between gap-2">
                     <span className="text-sm text-gray-700">
                       {sku.name}
-                      {sit.discount[sku.name] === null && <span className="ml-1 text-[11px] text-gray-400">진행 안 함</span>}
+                      {skuDiscount(sit, sku.name) === null && <span className="ml-1 text-[11px] text-gray-400">진행 안 함</span>}
+                      {sku.name === COMPLETE_SKU && <span className="ml-1 text-[11px] text-gray-400">별도 주문 · AMS 없음</span>}
                     </span>
                     <div className="flex items-center rounded-md border border-amber-300 bg-amber-50">
                       <button
@@ -185,8 +203,8 @@ export default function SimTab({
             A={A}
             result={cardRow}
             spike={sim.spike}
-            amsName={input.ams}
-            chip={`${sit.name} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget} · ${AMS_SHORT[input.ams] === "없음" ? "AMS 없음" : `AMS ${AMS_SHORT[input.ams]}`}`}
+            amsName={cardAms}
+            chip={`${sit.name} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget} · ${AMS_SHORT[cardAms] === "없음" ? "AMS 없음" : `AMS ${AMS_SHORT[cardAms]}`}`}
             payLabel={effectiveTarget === "combined" ? "세트 판매가" : "판매가"}
             vsSeparate={effectiveTarget === "combined" ? sim.combined.vsSeparate : undefined}
             controls={
@@ -235,19 +253,21 @@ export default function SimTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {sim.rows.map((r) => (
+                  {campaignRows.map((r) => (
                     <SimTableRow key={r.sku} label={r.sku} qty={r.qty} row={r} />
                   ))}
-                  <SimTableRow label="합계 (한 주문)" qty={sim.combined.qty} row={sim.combined} bold />
+                  <SimTableRow label="합계 (한 주문, 컴플리트 제외)" qty={sim.combined.qty} row={sim.combined} bold />
+                  {completeRow && <SimTableRow label={`${completeRow.sku} (별도 주문)`} qty={completeRow.qty} row={completeRow} />}
                 </tbody>
               </table>
             </div>
 
             <div className="space-y-2 md:hidden">
-              {sim.rows.map((r) => (
+              {campaignRows.map((r) => (
                 <SimMobileCard key={r.sku} label={r.sku} qty={r.qty} row={r} />
               ))}
-              <SimMobileCard label="합계 (한 주문)" qty={sim.combined.qty} row={sim.combined} bold />
+              <SimMobileCard label="합계 (한 주문, 컴플리트 제외)" qty={sim.combined.qty} row={sim.combined} bold />
+              {completeRow && <SimMobileCard label={`${completeRow.sku} (별도 주문)`} qty={completeRow.qty} row={completeRow} />}
             </div>
 
             <p className="mt-3 text-sm">
@@ -258,6 +278,7 @@ export default function SimTab({
             </p>
             <p className="mt-1 text-xs text-gray-500">
               함께 사면 Last Mile 1회, 버라이어티는 애드온가({fmtMoney(A.skus[2].addonPrice ?? 0)}), 바우처는 장바구니 금액 기준.
+              컴플리트 세트는 별도 주문으로만 계산 (AMS 선택과 무관하게 AMS 0%).
             </p>
           </Card>
 
@@ -288,10 +309,16 @@ function ReadOnly({ label, value }: { label: string; value: string }) {
 
 function VoucherCellLabel({ row }: { row: Settlement }) {
   if (!row.voucher) return <span className="text-gray-400">-</span>;
-  if (row.voucherStatus === "미달")
+  if (row.voucherStatus === "미달" || row.voucherStatus === "적용 불가")
     return (
       <span className="inline-flex items-center gap-1">
-        <span className="rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800">미달</span>
+        <span
+          className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+            row.voucherStatus === "미달" ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-600"
+          }`}
+        >
+          {row.voucherStatus}
+        </span>
         <span className="text-gray-500">{row.voucher}</span>
       </span>
     );
@@ -382,7 +409,7 @@ function SimMobileCard({ label, qty, row, bold }: { label: string; qty: number; 
 }
 
 function VoucherTable({ A, sim, highlight }: { A: Assumptions; sim: ReturnType<typeof simulate>; highlight: string }) {
-  const cols = ["메인팩 1", "3팩 번들", "버라이어티 단품", "함께 구매"];
+  const cols = ["메인팩 1", "3팩 번들", "버라이어티 단품", "함께 구매", "컴플리트 세트"];
   const maxByCol = cols.map((_, i) => {
     let best = -Infinity;
     for (const r of sim.voucherTable) {
@@ -395,7 +422,8 @@ function VoucherTable({ A, sim, highlight }: { A: Assumptions; sim: ReturnType<t
     <Card>
       <h2 className="text-sm font-semibold text-gray-900">바우처별 마진표</h2>
       <p className="mb-3 mt-0.5 text-xs text-gray-500">
-        현재 상황·AMS·수량에서 각 바우처를 썼을 때의 마진. &quot;미달&quot;은 최소 구매액 미달, &quot;-&quot;는 결제가 없음.
+        현재 상황·AMS·수량에서 각 바우처를 썼을 때의 마진. &quot;미달&quot;은 최소 구매액 미달, &quot;-&quot;는 결제가 없음, &quot;적용
+        불가&quot;는 컴플리트 세트에 쓸 수 없는 바우처.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full whitespace-nowrap text-right text-xs tabular-nums">

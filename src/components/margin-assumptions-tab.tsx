@@ -5,7 +5,7 @@ import {
   AMS_NAMES,
   NO_VOUCHER,
   SITUATION_VOUCHER_GROUPS,
-  SKU_NAMES,
+  CAMPAIGN_SKUS,
   VOUCHER_GROUPS,
   baseFeeRate,
   lastMileNet,
@@ -71,7 +71,7 @@ export default function AssumptionsTab({
     update((x) => {
       let n = 1;
       while (x.vouchers.some((v) => v.name === `새 바우처 ${n}`)) n++;
-      x.vouchers.push({ name: `새 바우처 ${n}`, group: "샵", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false });
+      x.vouchers.push({ name: `새 바우처 ${n}`, group: "샵", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false, complete: false });
     });
 
   const th = "px-2 py-2 text-left font-medium text-gray-500";
@@ -284,13 +284,13 @@ export default function AssumptionsTab({
 
       <Card className="mt-4">
         <h2 className="text-sm font-semibold text-gray-900">상황별 할인율 (상시가 대비)</h2>
-        <p className="mb-3 mt-0.5 text-xs text-gray-500">&quot;진행 안 함&quot;인 SKU는 그 상황에서 계산 대상에서 빠집니다.</p>
+        <p className="mb-3 mt-0.5 text-xs text-gray-500">&quot;진행 안 함&quot;인 SKU는 그 상황에서 계산 대상에서 빠집니다. 컴플리트 세트는 캠페인 미진행이라 모든 상황에서 상시가입니다.</p>
         <div className="overflow-x-auto">
           <table className="w-full whitespace-nowrap text-sm">
             <thead className="text-xs">
               <tr className="border-b border-gray-200">
                 <th className={th}>상황</th>
-                {SKU_NAMES.map((n) => (
+                {CAMPAIGN_SKUS.map((n) => (
                   <th key={n} className={th}>
                     {n}
                   </th>
@@ -304,7 +304,7 @@ export default function AssumptionsTab({
               {A.situations.map((s, i) => (
                 <tr key={s.name} className="border-b border-gray-100">
                   <td className={`${td} font-medium text-gray-900`}>{s.name}</td>
-                  {SKU_NAMES.map((n) => {
+                  {CAMPAIGN_SKUS.map((n) => {
                     const d = s.discount[n];
                     return (
                       <td key={n} className={td}>
@@ -389,6 +389,7 @@ export default function AssumptionsTab({
                 <th className={th}>캡</th>
                 <th className={th}>쇼피 환급</th>
                 <th className={th}>자동 선택</th>
+                <th className={th}>컴플리트 적용</th>
                 <th className={th}>비고</th>
                 <th className={th} />
               </tr>
@@ -427,7 +428,7 @@ export default function AssumptionsTab({
                       )}
                     </td>
                     {locked ? (
-                      <td colSpan={7} className={`${td} text-xs text-gray-400`}>
+                      <td colSpan={8} className={`${td} text-xs text-gray-400`}>
                         고정 항목
                       </td>
                     ) : (
@@ -484,6 +485,14 @@ export default function AssumptionsTab({
                             aria-label={`${v.name} 자동 선택 포함`}
                             checked={v.auto}
                             onChange={(e) => update((x) => void (x.vouchers[i].auto = e.target.checked))}
+                          />
+                        </td>
+                        <td className={td}>
+                          <input
+                            type="checkbox"
+                            aria-label={`${v.name} 컴플리트 세트 적용`}
+                            checked={v.complete}
+                            onChange={(e) => update((x) => void (x.vouchers[i].complete = e.target.checked))}
                           />
                         </td>
                       </>

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   AMS_NAMES,
+  COMPLETE_SKU,
   SKU_NAMES,
   findSituation,
   findSku,
@@ -29,6 +30,7 @@ type Col = {
 };
 
 const money = (n: number) => <span className={n < 0 ? "text-red-600" : ""}>{fmtMoney(n)}</span>;
+const amsMoney = (n: number | null) => (n === null ? <span className="text-gray-400">AMS 미진행</span> : money(n));
 const pct = (n: number) => <span className={n < 0 ? "text-red-600" : ""}>{fmtPct(n)}</span>;
 
 const COLUMNS: Col[] = [
@@ -89,8 +91,8 @@ const COLUMNS: Col[] = [
   { key: "margin", label: "마진", value: (r) => r.margin, render: (r) => money(r.margin) },
   { key: "marginRate", label: "마진율", value: (r) => r.marginRate, render: (r) => pct(r.marginRate) },
   { key: "grade", label: "등급", left: true, value: (r) => r.grade, render: (r) => <GradeBadge grade={r.grade} /> },
-  { key: "marginAmsOpen", label: "AMS 18% 중첩 마진", value: (r) => r.marginAmsOpen, render: (r) => money(r.marginAmsOpen) },
-  { key: "marginAmsTarget", label: "AMS 20% 중첩 마진", value: (r) => r.marginAmsTarget, render: (r) => money(r.marginAmsTarget) },
+  { key: "marginAmsOpen", label: "AMS 18% 중첩 마진", value: (r) => r.marginAmsOpen ?? r.margin, render: (r) => amsMoney(r.marginAmsOpen) },
+  { key: "marginAmsTarget", label: "AMS 20% 중첩 마진", value: (r) => r.marginAmsTarget ?? r.margin, render: (r) => amsMoney(r.marginAmsTarget) },
 ];
 
 const STATUSES: VoucherStatus[] = ["적용", "미달", "-"];
@@ -147,8 +149,8 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
   return (
     <>
       <Hint>
-        상황 × SKU × 바우처 조합을 수량 1, AMS 없음으로 계산한 목록입니다. AMS 18%/20% 중첩 마진은 별도 열. 행을 누르면 그 시나리오의 수익
-        구조가 표시됩니다.
+        상황 × SKU × 바우처 조합을 수량 1, AMS 없음으로 계산한 목록입니다. AMS 18%/20% 중첩 마진은 별도 열. 컴플리트 세트는 캠페인 할인 없이
+        상시가, 샵 바우처 4종·신규·팔로우만, AMS 미진행. 행을 누르면 그 시나리오의 수익 구조가 표시됩니다.
       </Hint>
 
       <Card className="mb-4 space-y-2">
@@ -251,16 +253,20 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
                   A={A}
                   result={cardResult}
                   spike={selSit.spike}
-                  amsName={cardAms}
+                  amsName={selected.sku === COMPLETE_SKU ? "AMS 없음" : cardAms}
                   chip={`${selected.situation} · ${selected.sku} · ${selected.voucher}`}
                   payLabel="판매가"
                   controls={
-                    <Segmented
-                      size="sm"
-                      value={cardAms}
-                      onChange={setCardAms}
-                      options={AMS_NAMES.map((n) => ({ value: n, label: `AMS ${AMS_SHORT[n]}` }))}
-                    />
+                    selected.sku === COMPLETE_SKU ? (
+                      <span className="text-xs text-gray-500">AMS 미진행</span>
+                    ) : (
+                      <Segmented
+                        size="sm"
+                        value={cardAms}
+                        onChange={setCardAms}
+                        options={AMS_NAMES.map((n) => ({ value: n, label: `AMS ${AMS_SHORT[n]}` }))}
+                      />
+                    )
                   }
                   footer={
                     <button
@@ -270,7 +276,7 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
                           situation: selected.situation,
                           voucher: selected.voucher ?? "",
                           ams: cardAms,
-                          qty: { "메인팩 1": 0, "3팩 번들": 0, "버라이어티 단품": 0, [selected.sku]: 1 },
+                          qty: { "메인팩 1": 0, "3팩 번들": 0, "버라이어티 단품": 0, "컴플리트 세트": 0, [selected.sku]: 1 },
                         })
                       }
                       className="w-full rounded-md bg-[#0066cc] px-3 py-2 text-sm font-medium text-white hover:bg-[#0058b0]"

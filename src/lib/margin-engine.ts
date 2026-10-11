@@ -9,8 +9,13 @@
 export type AmsName = "AMS 없음" | "AMS 오픈 18% (최악)" | "AMS 타겟 20% (최악)";
 export const AMS_NAMES: AmsName[] = ["AMS 없음", "AMS 오픈 18% (최악)", "AMS 타겟 20% (최악)"];
 
-export const SKU_NAMES = ["메인팩 1", "3팩 번들", "버라이어티 단품"] as const;
+export const SKU_NAMES = ["메인팩 1", "3팩 번들", "버라이어티 단품", "컴플리트 세트"] as const;
 export type SkuName = (typeof SKU_NAMES)[number];
+// 상황 할인·AMS·함께 구매가 적용되는 SKU. 컴플리트 세트는 캠페인 미진행:
+// 항상 상시가, AMS 0%, 별도 주문, 「컴플리트 적용」 바우처만 사용.
+export const CAMPAIGN_SKUS = ["메인팩 1", "3팩 번들", "버라이어티 단품"] as const;
+export type CampaignSkuName = (typeof CAMPAIGN_SKUS)[number];
+export const COMPLETE_SKU = "컴플리트 세트";
 
 export const SITUATION_VOUCHER_GROUPS = ["샵", "라이브", "10.10", "없음"] as const;
 export const VOUCHER_GROUPS = ["-", "샵", "라이브", "10.10"] as const;
@@ -30,7 +35,7 @@ export type Sku = {
 export type Situation = {
   name: string;
   // null = 진행 안 함
-  discount: Record<SkuName, number | null>;
+  discount: Record<CampaignSkuName, number | null>;
   spike: boolean;
   voucherGroup: string;
   note?: string;
@@ -45,6 +50,7 @@ export type Voucher = {
   cap: number; // 0 = 상한 없음
   refund: number;
   auto: boolean;
+  complete: boolean; // 컴플리트 세트에 적용 가능
   note?: string;
 };
 
@@ -65,7 +71,7 @@ export type Assumptions = {
 };
 
 export type Grade = "-" | "역마진" | "여유" | "보통" | "주의" | "위험";
-export type VoucherStatus = "-" | "적용" | "미달";
+export type VoucherStatus = "-" | "적용" | "미달" | "적용 불가";
 
 // ===== 가정 (Assumptions) =====
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
@@ -76,6 +82,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
     { name: "메인팩 1", listPrice: 27.8, costKrw: 3572, overheadUnits: 1, addonPrice: null, note: "6색 평균 원가" },
     { name: "3팩 번들", listPrice: 74.8, costKrw: 10631.4, overheadUnits: 3, addonPrice: null, note: "번들 5종 평균 원가" },
     { name: "버라이어티 단품", listPrice: 12.8, costKrw: 1400, overheadUnits: 1, addonPrice: 9.8, note: "메인팩·번들과 함께 사면 애드온가 적용" },
+    { name: "컴플리트 세트", listPrice: 138.8, costKrw: 21432, overheadUnits: 6, addonPrice: null, note: "6색 전종. 캠페인·AMS 미진행, 샵 바우처 4종·신규·팔로우만 적용" },
   ],
   situations: [
     { name: "평시", discount: { "메인팩 1": 0, "3팩 번들": 0, "버라이어티 단품": 0 }, spike: false, voucherGroup: "샵", note: "상시가 판매" },
@@ -87,20 +94,20 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
     { name: "10.18 GDD", discount: { "메인팩 1": 0.35, "3팩 번들": 0.4, "버라이어티 단품": 0.15 }, spike: false, voucherGroup: "샵", note: "최근 1개월 최저가보다 4% 이상 낮아야 승인" },
   ],
   vouchers: [
-    { name: "바우처 없음", group: "-", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false },
-    { name: "샵 T1 5% (S$30↑)", group: "샵", type: "rate", value: 0.05, min: 30, cap: 0, refund: 0, auto: true },
-    { name: "샵 T2 10% (S$50↑)", group: "샵", type: "rate", value: 0.1, min: 50, cap: 0, refund: 0, auto: true },
-    { name: "샵 T3 15% (S$60↑)", group: "샵", type: "rate", value: 0.15, min: 60, cap: 0, refund: 0, auto: true },
-    { name: "샵 T4 20% (S$100↑)", group: "샵", type: "rate", value: 0.2, min: 100, cap: 0, refund: 0, auto: true },
-    { name: "팔로우 S$1", group: "샵", type: "fixed", value: 1, min: 0, cap: 0, refund: 0, auto: false, note: "팔로워 확보용" },
-    { name: "신규 구매자 S$2 (S$20↑)", group: "샵", type: "fixed", value: 2, min: 20, cap: 0, refund: 0, auto: false },
-    { name: "라이브 Early S$5 (S$20↑)", group: "라이브", type: "fixed", value: 5, min: 20, cap: 0, refund: 0, auto: true },
-    { name: "라이브 Default S$3 (S$20↑)", group: "라이브", type: "fixed", value: 3, min: 20, cap: 0, refund: 0, auto: true },
-    { name: "라이브 Flash S$5 (S$30↑)", group: "라이브", type: "fixed", value: 5, min: 30, cap: 0, refund: 0, auto: true },
-    { name: "라이브 Stock-Up S$8 (S$44↑)", group: "라이브", type: "fixed", value: 8, min: 44, cap: 0, refund: 0, auto: true },
-    { name: "10.10 Co-Share 20%", group: "10.10", type: "rate", value: 0.2, min: 25, cap: 5, refund: 0.2, auto: true, note: "환급률 1/5는 크로스보더 적용 여부 미확정" },
-    { name: "10.10 15%", group: "10.10", type: "rate", value: 0.15, min: 25, cap: 5, refund: 0, auto: true },
-    { name: "10.10 18%", group: "10.10", type: "rate", value: 0.18, min: 10, cap: 3, refund: 0, auto: true },
+    { name: "바우처 없음", group: "-", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false, complete: false },
+    { name: "샵 T1 5% (S$30↑)", group: "샵", type: "rate", value: 0.05, min: 30, cap: 0, refund: 0, auto: true, complete: true },
+    { name: "샵 T2 10% (S$50↑)", group: "샵", type: "rate", value: 0.1, min: 50, cap: 0, refund: 0, auto: true, complete: true },
+    { name: "샵 T3 15% (S$60↑)", group: "샵", type: "rate", value: 0.15, min: 60, cap: 0, refund: 0, auto: true, complete: true },
+    { name: "샵 T4 20% (S$100↑)", group: "샵", type: "rate", value: 0.2, min: 100, cap: 0, refund: 0, auto: true, complete: true },
+    { name: "팔로우 S$1", group: "샵", type: "fixed", value: 1, min: 0, cap: 0, refund: 0, auto: false, complete: true, note: "팔로워 확보용" },
+    { name: "신규 구매자 S$2 (S$20↑)", group: "샵", type: "fixed", value: 2, min: 20, cap: 0, refund: 0, auto: false, complete: true },
+    { name: "라이브 Early S$5 (S$20↑)", group: "라이브", type: "fixed", value: 5, min: 20, cap: 0, refund: 0, auto: true, complete: false },
+    { name: "라이브 Default S$3 (S$20↑)", group: "라이브", type: "fixed", value: 3, min: 20, cap: 0, refund: 0, auto: true, complete: false },
+    { name: "라이브 Flash S$5 (S$30↑)", group: "라이브", type: "fixed", value: 5, min: 30, cap: 0, refund: 0, auto: true, complete: false },
+    { name: "라이브 Stock-Up S$8 (S$44↑)", group: "라이브", type: "fixed", value: 8, min: 44, cap: 0, refund: 0, auto: true, complete: false },
+    { name: "10.10 Co-Share 20%", group: "10.10", type: "rate", value: 0.2, min: 25, cap: 5, refund: 0.2, auto: true, complete: false, note: "환급률 1/5는 크로스보더 적용 여부 미확정" },
+    { name: "10.10 15%", group: "10.10", type: "rate", value: 0.15, min: 25, cap: 5, refund: 0, auto: true, complete: false },
+    { name: "10.10 18%", group: "10.10", type: "rate", value: 0.18, min: 10, cap: 3, refund: 0, auto: true, complete: false },
   ],
   grade: { relaxed: 2.0, normal: 1.6, caution: 1.3 },
 };
@@ -127,11 +134,14 @@ export function voucherDiscount(v: Voucher | null | undefined, amount: number): 
 }
 
 // 자동(최대 할인) 바우처 선택: 시뮬레이터 F열 로직
-export function autoVoucher(A: Assumptions, sit: Situation, amount: number): Voucher | null {
+// 컴플리트 세트는 상황 구분과 무관하게 「컴플리트 적용」 바우처 중에서 고른다 (F15).
+export function autoVoucher(A: Assumptions, sit: Situation, amount: number, complete = false): Voucher | null {
   let best: Voucher | null = null;
   let bestD = 0;
   for (const v of A.vouchers) {
-    const groupOk = (v.group === "샵" && sit.voucherGroup !== "없음") || v.group === sit.voucherGroup;
+    const groupOk = complete
+      ? v.complete
+      : (v.group === "샵" && sit.voucherGroup !== "없음") || v.group === sit.voucherGroup;
     if (!v.auto || amount <= 0 || amount < v.min || !groupOk) continue;
     const d = voucherDiscount(v, amount);
     // 동률이면 목록상 먼저 나온 것 (MATCH 동작)
@@ -191,17 +201,21 @@ type SettleInput = {
   sit: Situation;
   amsName: string;
   voucherSel: string;
+  complete?: boolean; // 컴플리트 세트 (amsName은 호출 쪽에서 AMS 없음으로 넘긴다)
 };
 
 // 한 줄(주문) 계산
-function settle(A: Assumptions, { listTotal, discounted, productCost, logistics, sit, amsName, voucherSel }: SettleInput): Settlement {
+function settle(
+  A: Assumptions,
+  { listTotal, discounted, productCost, logistics, sit, amsName, voucherSel, complete = false }: SettleInput,
+): Settlement {
   const rate = feeRate(A, sit, amsName);
   let voucher: Voucher | null = null;
   let status: VoucherStatus = "-";
   if (discounted > 0) {
-    const chosen = voucherSel === AUTO_VOUCHER ? autoVoucher(A, sit, discounted) : findVoucher(A, voucherSel);
+    const chosen = voucherSel === AUTO_VOUCHER ? autoVoucher(A, sit, discounted, complete) : findVoucher(A, voucherSel);
     if (chosen && chosen.name !== NO_VOUCHER) {
-      status = discounted < chosen.min ? "미달" : "적용";
+      status = complete && !chosen.complete ? "적용 불가" : discounted < chosen.min ? "미달" : "적용";
       voucher = chosen;
     }
   }
@@ -251,7 +265,7 @@ export type SimInput = {
 
 export type SimRow = Settlement & { sku: SkuName; qty: number };
 export type SimCombined = Settlement & { qty: number; vsSeparate: number };
-export type VoucherCell = number | "-" | "미달";
+export type VoucherCell = number | "-" | "미달" | "적용 불가";
 export type VoucherTableRow = { voucher: string; min: number; cells: VoucherCell[] };
 
 export type SimResult = {
@@ -262,12 +276,17 @@ export type SimResult = {
   voucherTable: VoucherTableRow[];
 };
 
+// 상황 할인율. 컴플리트 세트는 캠페인 미진행이라 항상 0 (상시가)
+export const skuDiscount = (sit: Situation, sku: SkuName): number | null =>
+  sku === COMPLETE_SKU ? 0 : sit.discount[sku];
+
 export function simulate(A: Assumptions, input: SimInput): SimResult {
   const sit = findSituation(A, input.situation) ?? A.situations[0];
   const lm = lastMileNet(A);
   const rows: SimRow[] = A.skus.map((sku) => {
     const q = input.qty[sku.name] ?? 0;
-    const d = sit.discount[sku.name];
+    const d = skuDiscount(sit, sku.name);
+    const complete = sku.name === COMPLETE_SKU;
     const listTotal = d === null ? 0 : sku.listPrice * q;
     const discounted = d === null ? 0 : listTotal * (1 - d);
     return {
@@ -277,15 +296,16 @@ export function simulate(A: Assumptions, input: SimInput): SimResult {
         listTotal,
         discounted,
         sit,
-        amsName: input.ams,
+        amsName: complete ? "AMS 없음" : input.ams,
         voucherSel: input.voucher,
         productCost: discounted === 0 ? 0 : unitCost(A, sku) * q,
         logistics: discounted === 0 ? 0 : lm,
+        complete,
       }),
     };
   });
-  // 함께 구매(한 주문): 메인팩/번들이 있으면 버라이어티는 애드온가
-  const [m, b, v] = rows;
+  // 함께 구매(한 주문): 메인팩/번들이 있으면 버라이어티는 애드온가. 컴플리트 세트는 별도 주문이라 제외
+  const [m, b, v, c] = rows;
   const vs = findSku(A, "버라이어티 단품");
   const vDiscounted = v.listTotal === 0 ? 0 : m.qty + b.qty > 0 ? (vs?.addonPrice ?? 0) * v.qty : v.discounted;
   const discounted = m.discounted + b.discounted + vDiscounted;
@@ -303,9 +323,9 @@ export function simulate(A: Assumptions, input: SimInput): SimResult {
   };
   const combined: SimCombined = {
     ...combinedBase,
-    vsSeparate: combinedBase.margin - rows.reduce((s, r) => s + r.margin, 0),
+    vsSeparate: combinedBase.margin - (m.margin + b.margin + v.margin),
   };
-  // 바우처별 마진 표
+  // 바우처별 마진 표: 메인팩·번들·버라이어티·함께 구매·컴플리트 세트
   const voucherTable = A.vouchers.map((vo) => {
     const cell = (r: Settlement): VoucherCell => {
       if (r.discounted === 0) return "-";
@@ -313,7 +333,9 @@ export function simulate(A: Assumptions, input: SimInput): SimResult {
       const vd = voucherDiscount(vo, r.discounted);
       return (r.discounted - vd) * (1 - r.feeRate) - r.productCost - r.logistics + vd * vo.refund;
     };
-    return { voucher: vo.name, min: vo.min, cells: [...rows.map(cell), cell(combined)] };
+    // 시트는 바우처 없음도 '적용 불가'로 두지만, 바우처 없이 사는 경우의 마진을 보여준다
+    const completeCell: VoucherCell = c.discounted > 0 && vo.name !== NO_VOUCHER && !vo.complete ? "적용 불가" : cell(c);
+    return { voucher: vo.name, min: vo.min, cells: [cell(m), cell(b), cell(v), cell(combined), completeCell] };
   });
   return { feeRate: feeRate(A, sit, input.ams), spike: sit.spike, rows, combined, voucherTable };
 }
@@ -323,17 +345,27 @@ export type ScenarioRow = Settlement & {
   id: string;
   situation: string;
   sku: SkuName;
-  marginAmsOpen: number;
-  marginAmsTarget: number;
+  marginAmsOpen: number | null; // null = AMS 미진행 (컴플리트 세트)
+  marginAmsTarget: number | null;
   orderFixedCost: number;
 };
 
-// 시나리오 한 줄을 임의의 AMS 조건으로 계산 (시나리오 목록 = AMS 없음)
+// 시나리오 한 줄을 임의의 AMS 조건으로 계산 (시나리오 목록 = AMS 없음). 컴플리트 세트는 AMS 무시
 export function settleScenario(A: Assumptions, sit: Situation, sku: Sku, voucherName: string, amsName: string): Settlement {
-  const d = sit.discount[sku.name] ?? 0;
+  const complete = sku.name === COMPLETE_SKU;
+  const d = skuDiscount(sit, sku.name) ?? 0;
   const listTotal = sku.listPrice;
   const discounted = listTotal * (1 - d);
-  return settle(A, { listTotal, discounted, productCost: unitCost(A, sku), logistics: lastMileNet(A), sit, amsName, voucherSel: voucherName });
+  return settle(A, {
+    listTotal,
+    discounted,
+    productCost: unitCost(A, sku),
+    logistics: lastMileNet(A),
+    sit,
+    amsName: complete ? "AMS 없음" : amsName,
+    voucherSel: voucherName,
+    complete,
+  });
 }
 
 export function scenarioList(A: Assumptions): ScenarioRow[] {
@@ -341,8 +373,9 @@ export function scenarioList(A: Assumptions): ScenarioRow[] {
   const lm = lastMileNet(A);
   for (const sit of A.situations)
     for (const sku of A.skus) {
-      if (sit.discount[sku.name] === null) continue;
-      const vs = A.vouchers.filter((v) => v.name === NO_VOUCHER || v.group === sit.voucherGroup);
+      if (skuDiscount(sit, sku.name) === null) continue;
+      const complete = sku.name === COMPLETE_SKU;
+      const vs = A.vouchers.filter((v) => v.name === NO_VOUCHER || (complete ? v.complete : v.group === sit.voucherGroup));
       for (const vo of vs) {
         const base = settleScenario(A, sit, sku, vo.name, "AMS 없음");
         out.push({
@@ -352,8 +385,8 @@ export function scenarioList(A: Assumptions): ScenarioRow[] {
           sku: sku.name,
           voucher: vo.name,
           voucherStatus: vo.name === NO_VOUCHER ? "-" : base.voucherStatus,
-          marginAmsOpen: base.margin - base.pay * A.ams["AMS 오픈 18% (최악)"],
-          marginAmsTarget: base.margin - base.pay * A.ams["AMS 타겟 20% (최악)"],
+          marginAmsOpen: complete ? null : base.margin - base.pay * A.ams["AMS 오픈 18% (최악)"],
+          marginAmsTarget: complete ? null : base.margin - base.pay * A.ams["AMS 타겟 20% (최악)"],
           orderFixedCost: unitCost(A, sku) + lm,
         });
       }
@@ -364,10 +397,19 @@ export function scenarioList(A: Assumptions): ScenarioRow[] {
 // ===== 저장값 검증 =====
 // localStorage / JSON 가져오기에서 읽은 값이 엔진이 기대하는 모양인지 확인한다.
 // SKU·상황 이름과 AMS 이름은 화면에서 바꿀 수 없으므로 기본값과 같아야 한다.
+// 컴플리트 세트 추가 전에 저장된 값(SKU 3개, 바우처에 complete 없음)은 기본값으로 채워 이어 쓴다.
 export function parseAssumptions(raw: unknown): Assumptions | null {
   const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
   const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
   if (!isObj(raw)) return null;
+  if (Array.isArray(raw.skus) && raw.skus.length === CAMPAIGN_SKUS.length) {
+    raw.skus = [...raw.skus, structuredClone(DEFAULT_ASSUMPTIONS.skus[SKU_NAMES.indexOf(COMPLETE_SKU)])];
+  }
+  if (Array.isArray(raw.vouchers)) {
+    for (const v of raw.vouchers) {
+      if (isObj(v) && v.complete === undefined) v.complete = findVoucher(DEFAULT_ASSUMPTIONS, String(v.name))?.complete ?? false;
+    }
+  }
   const { fees, ams, logistics, skus, situations, vouchers, grade: g } = raw;
   if (!isObj(fees) || !["shopee", "pg", "payoneer", "spikeDayExtra"].every((k) => isNum(fees[k]))) return null;
   if (!isObj(ams) || !AMS_NAMES.every((k) => isNum(ams[k]))) return null;
@@ -402,7 +444,7 @@ export function parseAssumptions(raw: unknown): Assumptions | null {
         typeof s.spike === "boolean" &&
         typeof s.voucherGroup === "string" &&
         isObj(s.discount) &&
-        SKU_NAMES.every((k) => (s.discount as Record<string, unknown>)[k] === null || isNum((s.discount as Record<string, unknown>)[k])),
+        CAMPAIGN_SKUS.every((k) => (s.discount as Record<string, unknown>)[k] === null || isNum((s.discount as Record<string, unknown>)[k])),
     )
   )
     return null;
@@ -419,7 +461,8 @@ export function parseAssumptions(raw: unknown): Assumptions | null {
         isNum(v.min) &&
         isNum(v.cap) &&
         isNum(v.refund) &&
-        typeof v.auto === "boolean",
+        typeof v.auto === "boolean" &&
+        typeof v.complete === "boolean",
     )
   )
     return null;
