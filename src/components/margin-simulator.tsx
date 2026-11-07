@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  AMS_NAMES,
   AUTO_VOUCHER,
   DEFAULT_ASSUMPTIONS,
   SKU_NAMES,
@@ -14,7 +13,8 @@ import SimTab from "@/components/margin-sim-tab";
 import ScenarioTab from "@/components/margin-scenario-tab";
 import AssumptionsTab from "@/components/margin-assumptions-tab";
 
-const STORAGE_KEY = "penefit-margin-assumptions-v1";
+// v2: 11.11 시트 기준 (AMS 삭제, 프로모션·바우처 교체). v1 저장값은 옛 프로모션이라 버리고 기본값으로 시작한다.
+const STORAGE_KEY = "penefit-margin-assumptions-v2";
 
 type Tab = "sim" | "list" | "assumptions";
 const TABS: { id: Tab; label: string }[] = [
@@ -23,14 +23,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "assumptions", label: "가정" },
 ];
 
-// URL에선 AMS를 짧은 id로 쓴다 (?ams=none|open|target)
-const AMS_IDS = ["none", "open", "target"] as const;
-
 const DEFAULT_INPUT: SimInput = {
-  situation: "10.10 (10/9-10/12)",
+  situation: "11.11 캠페인 (10/30-11/18)",
   voucher: AUTO_VOUCHER,
-  ams: "AMS 타겟 20% (최악)",
-  qty: { "메인팩 1": 1, "3팩 번들": 0, "버라이어티 단품": 1, "컴플리트 세트": 0 },
+  qty: { "메인팩 1": 1, "3팩 번들": 0, "버라이어티 단품": 1, "컴플리트 세트": 1 },
 };
 
 function loadAssumptions(): Assumptions {
@@ -58,14 +54,12 @@ function saveAssumptions(A: Assumptions | null) {
 function readUrl(): { tab: Tab; input: SimInput } {
   const p = new URLSearchParams(window.location.search);
   const tab = TABS.some((t) => t.id === p.get("tab")) ? (p.get("tab") as Tab) : "sim";
-  const amsIdx = AMS_IDS.indexOf(p.get("ams") as (typeof AMS_IDS)[number]);
   const q = (p.get("q") ?? "").split(",").map(Number);
   // 컴플리트 세트 추가 전 링크(수량 3개)도 그대로 열린다
   const qtyOk = (q.length === SKU_NAMES.length || q.length === SKU_NAMES.length - 1) && q.every((n) => Number.isFinite(n));
   const input: SimInput = {
     situation: p.get("sit") ?? DEFAULT_INPUT.situation,
     voucher: p.get("v") ?? DEFAULT_INPUT.voucher,
-    ams: amsIdx >= 0 ? AMS_NAMES[amsIdx] : DEFAULT_INPUT.ams,
     qty: qtyOk
       ? (Object.fromEntries(SKU_NAMES.map((n, i) => [n, Math.min(20, Math.max(0, q[i] ?? 0))])) as SimInput["qty"])
       : DEFAULT_INPUT.qty,
@@ -87,7 +81,6 @@ export default function MarginSimulator() {
     if (tab !== "sim") p.set("tab", tab);
     p.set("sit", input.situation);
     p.set("v", input.voucher);
-    p.set("ams", AMS_IDS[Math.max(0, AMS_NAMES.indexOf(input.ams as (typeof AMS_NAMES)[number]))]);
     p.set("q", SKU_NAMES.map((n) => input.qty[n] ?? 0).join(","));
     window.history.replaceState(null, "", `${window.location.pathname}?${p.toString()}`);
   }, [tab, input]);

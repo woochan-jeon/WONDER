@@ -2,8 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  AMS_NAMES,
-  COMPLETE_SKU,
   SKU_NAMES,
   findSituation,
   findSku,
@@ -17,8 +15,8 @@ import {
   type VoucherStatus,
 } from "@/lib/margin-engine";
 import ProfitCard from "@/components/margin-profit-card";
-import { AMS_SHORT, voucherValueLabel } from "@/components/margin-sim-tab";
-import { Card, GradeBadge, Hint, Segmented, fmtMoney, fmtPct } from "@/components/margin-ui";
+import { voucherValueLabel } from "@/components/margin-sim-tab";
+import { Card, GradeBadge, Hint, fmtMoney, fmtPct } from "@/components/margin-ui";
 
 type Col = {
   key: string;
@@ -30,7 +28,6 @@ type Col = {
 };
 
 const money = (n: number) => <span className={n < 0 ? "text-red-600" : ""}>{fmtMoney(n)}</span>;
-const amsMoney = (n: number | null) => (n === null ? <span className="text-gray-400">AMS 미진행</span> : money(n));
 const pct = (n: number) => <span className={n < 0 ? "text-red-600" : ""}>{fmtPct(n)}</span>;
 
 const COLUMNS: Col[] = [
@@ -87,12 +84,11 @@ const COLUMNS: Col[] = [
   { key: "discounted", label: "할인가", value: (r) => r.discounted, render: (r) => fmtMoney(r.discounted) },
   { key: "voucherDiscount", label: "바우처 할인", value: (r) => r.voucherDiscount, render: (r) => fmtMoney(r.voucherDiscount) },
   { key: "pay", label: "결제가", value: (r) => r.pay, render: (r) => fmtMoney(r.pay) },
+  { key: "totalCost", label: "총 비용", value: (r) => r.totalCost, render: (r) => fmtMoney(r.totalCost) },
   { key: "cumulativeDiscount", label: "누적 할인율", value: (r) => r.cumulativeDiscount, render: (r) => fmtPct(r.cumulativeDiscount) },
   { key: "margin", label: "마진", value: (r) => r.margin, render: (r) => money(r.margin) },
   { key: "marginRate", label: "마진율", value: (r) => r.marginRate, render: (r) => pct(r.marginRate) },
   { key: "grade", label: "등급", left: true, value: (r) => r.grade, render: (r) => <GradeBadge grade={r.grade} /> },
-  { key: "marginAmsOpen", label: "AMS 18% 중첩 마진", value: (r) => r.marginAmsOpen ?? r.margin, render: (r) => amsMoney(r.marginAmsOpen) },
-  { key: "marginAmsTarget", label: "AMS 20% 중첩 마진", value: (r) => r.marginAmsTarget ?? r.margin, render: (r) => amsMoney(r.marginAmsTarget) },
 ];
 
 const STATUSES: VoucherStatus[] = ["적용", "미달", "-"];
@@ -106,7 +102,6 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const [showAux, setShowAux] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [cardAms, setCardAms] = useState<string>("AMS 타겟 20% (최악)");
 
   const all = useMemo(() => scenarioList(A), [A]);
   const rows = useMemo(() => {
@@ -137,7 +132,7 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
   const selected = selectedId ? all.find((r) => r.id === selectedId) : undefined;
   const selSit = selected ? findSituation(A, selected.situation) : undefined;
   const selSku = selected ? findSku(A, selected.sku) : undefined;
-  const cardResult = selected && selSit && selSku ? settleScenario(A, selSit, selSku, selected.voucher ?? "", cardAms) : null;
+  const cardResult = selected && selSit && selSku ? settleScenario(A, selSit, selSku, selected.voucher ?? "") : null;
 
   const toggle = (k: keyof Filters, v: string) =>
     setFilters((f) => ({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] }));
@@ -149,8 +144,9 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
   return (
     <>
       <Hint>
-        상황 × SKU × 바우처 조합을 수량 1, AMS 없음으로 계산한 목록입니다. AMS 18%/20% 중첩 마진은 별도 열. 컴플리트 세트는 캠페인 할인 없이
-        상시가, 샵 바우처 4종·신규·팔로우만, AMS 미진행. 행을 누르면 그 시나리오의 수익 구조가 표시됩니다.
+        상황 × SKU × 바우처 조합을 수량 1로 계산한 목록입니다. 컴플리트 세트는 캠페인 할인 없이 상시가, 샵 바우처 4종·신규·팔로우·재구매만
+        (스파이크데이 N·Y 두 경우). 플래시딜은 버라이어티 미진행, 라이브 바우처는 해당 SKU 전용. 행을 누르면 그 시나리오의 수익 구조가
+        표시됩니다.
       </Hint>
 
       <Card className="mb-4 space-y-2">
@@ -253,21 +249,8 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
                   A={A}
                   result={cardResult}
                   spike={selSit.spike}
-                  amsName={selected.sku === COMPLETE_SKU ? "AMS 없음" : cardAms}
                   chip={`${selected.situation} · ${selected.sku} · ${selected.voucher}`}
                   payLabel="판매가"
-                  controls={
-                    selected.sku === COMPLETE_SKU ? (
-                      <span className="text-xs text-gray-500">AMS 미진행</span>
-                    ) : (
-                      <Segmented
-                        size="sm"
-                        value={cardAms}
-                        onChange={setCardAms}
-                        options={AMS_NAMES.map((n) => ({ value: n, label: `AMS ${AMS_SHORT[n]}` }))}
-                      />
-                    )
-                  }
                   footer={
                     <button
                       type="button"
@@ -275,7 +258,6 @@ export default function ScenarioTab({ A, onOpenInSim }: { A: Assumptions; onOpen
                         onOpenInSim({
                           situation: selected.situation,
                           voucher: selected.voucher ?? "",
-                          ams: cardAms,
                           qty: { "메인팩 1": 0, "3팩 번들": 0, "버라이어티 단품": 0, "컴플리트 세트": 0, [selected.sku]: 1 },
                         })
                       }

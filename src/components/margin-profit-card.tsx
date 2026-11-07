@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { amsRate, baseFeeRate, type Assumptions, type Settlement } from "@/lib/margin-engine";
+import { baseFeeRate, type Assumptions, type Settlement } from "@/lib/margin-engine";
 import { Card, GradeBadge, fmtMoney, fmtPct, fmtSignedMoney } from "@/components/margin-ui";
 
 const COLORS = {
   margin: "#16a34a",
-  ams: "#e0a04b",
   platformFee: "#94a3b8",
   productCost: "#64748b",
   logistics: "#cbd5e1",
@@ -22,13 +21,12 @@ type SegKey = keyof typeof COLORS | "loss";
 type Seg = { key: SegKey; label: string; value: number; color: string; detail: string; striped?: boolean };
 
 // 상시가가 어디로 나가는지 보여주는 가로 누적 막대 카드.
-// 다섯 세그먼트(마진·AMS·플랫폼 수수료·상품 원가·물류)의 합 = 결제가,
+// 네 세그먼트(마진·플랫폼 수수료·상품 원가·물류)의 합 = 결제가,
 // 여기에 바우처 할인·캠페인(상황) 할인을 더하면 = 상시가 합계.
 export default function ProfitCard({
   A,
   result,
   spike,
-  amsName,
   chip,
   payLabel,
   vsSeparate,
@@ -38,7 +36,6 @@ export default function ProfitCard({
   A: Assumptions;
   result: Settlement;
   spike: boolean;
-  amsName: string;
   chip: string;
   payLabel: string;
   vsSeparate?: number;
@@ -64,13 +61,6 @@ export default function ProfitCard({
     value: bd.margin,
     color: COLORS.margin,
     detail: `마진 ${fmtMoney(bd.margin)} (${fmtPct(pctOfPay(bd.margin))})`,
-  };
-  const amsSeg: Seg = {
-    key: "ams",
-    label: "AMS",
-    value: bd.ams,
-    color: COLORS.ams,
-    detail: `AMS ${fmtMoney(bd.ams)} (${fmtPct(pctOfPay(bd.ams))}) — ${amsName}`,
   };
   const restValue = bd.platformFee + bd.productCost + bd.logistics;
   const restSegs: Seg[] = detailed
@@ -140,12 +130,12 @@ export default function ProfitCard({
 
   // 역마진이면 비용 합계가 결제가를 넘으므로, 결제가 위치에 마커를 두고 넘친 부분을 빗금으로 표시한다.
   const costEnd = loss ? pay - margin : pay;
-  const barSegs = [...(loss ? [] : [marginSeg]), amsSeg, ...restSegs, ...discountSegs];
+  const barSegs = [...(loss ? [] : [marginSeg]), ...restSegs, ...discountSegs];
   const barTotal = costEnd + discountTotal;
   const payMarker = (loss || discountTotal > 0) && barTotal > 0 ? (pay / barTotal) * 100 : null;
   const lossDetail = `역마진 ${fmtMoney(margin)} — 비용이 결제가를 ${fmtMoney(-margin)} 초과`;
   const activeDetail =
-    active === "loss" ? lossDetail : [marginSeg, amsSeg, ...restSegs, ...discountSegs].find((s) => s.key === active)?.detail;
+    active === "loss" ? lossDetail : [marginSeg, ...restSegs, ...discountSegs].find((s) => s.key === active)?.detail;
 
   const segHandlers = (key: SegKey) => ({
     onMouseEnter: () => setActive(key),
@@ -155,7 +145,7 @@ export default function ProfitCard({
     onClick: () => setActive((cur) => (cur === key ? null : key)),
   });
 
-  const legend = [marginSeg, amsSeg, ...restSegs];
+  const legend = [marginSeg, ...restSegs];
 
   return (
     <Card>
@@ -181,7 +171,13 @@ export default function ProfitCard({
       <div className="rounded-lg bg-gray-50 p-4 ring-1 ring-gray-100">
         <div className="grid grid-cols-3 gap-2">
           <Kpi label={payLabel} value={fmtMoney(pay)} />
-          <Kpi label="AMS 커미션" value={fmtMoney(bd.ams)} />
+          <Kpi
+            label="총 비용"
+            value={fmtMoney(result.totalCost)}
+            title={`수수료 ${fmtMoney(bd.platformFee)} + 상품 원가 ${fmtMoney(bd.productCost)} + 물류 ${fmtMoney(bd.logistics)}${
+              refund > 0 ? " (쇼피 환급 차감)" : ""
+            }`}
+          />
           <Kpi label="최종 예상 마진" value={fmtMoney(margin)} valueClass={pay === 0 ? "text-gray-900" : marginColor} />
         </div>
 
@@ -261,9 +257,8 @@ export default function ProfitCard({
                 )}
               </ul>
             ) : (
-              <ul className="mt-1 grid grid-cols-3 gap-2">
+              <ul className="mt-1 grid grid-cols-2 gap-2">
                 <LegendItem seg={marginSeg} pct={pctOfPay(marginSeg.value)} red={loss} />
-                <LegendItem seg={amsSeg} pct={pctOfPay(amsSeg.value)} className="justify-center" />
                 <LegendItem seg={restSegs[0]} pct={pctOfPay(restSegs[0].value)} className="justify-end text-right" />
               </ul>
             )}
@@ -302,15 +297,24 @@ export default function ProfitCard({
           </>
         )}
       </div>
-      {amsRate(A, amsName) === 0 && pay > 0 && <p className="mt-1 text-[11px] text-gray-400">AMS 없음 — AMS 세그먼트는 그리지 않음</p>}
       {footer && <div className="mt-3">{footer}</div>}
     </Card>
   );
 }
 
-function Kpi({ label, value, valueClass = "text-gray-900" }: { label: string; value: string; valueClass?: string }) {
+function Kpi({
+  label,
+  value,
+  valueClass = "text-gray-900",
+  title,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  title?: string;
+}) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={title}>
       <p className="truncate text-xs text-gray-500">{label}</p>
       <p className={`truncate text-base font-semibold tabular-nums sm:text-xl ${valueClass}`}>{value}</p>
     </div>

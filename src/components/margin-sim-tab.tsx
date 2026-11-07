@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  AMS_NAMES,
+  ALL_SKUS,
   AUTO_VOUCHER,
   COMPLETE_SKU,
   NO_VOUCHER,
@@ -19,12 +19,6 @@ import {
 } from "@/lib/margin-engine";
 import ProfitCard from "@/components/margin-profit-card";
 import { Card, GradeBadge, Hint, Segmented, fmtMoney, fmtPct, fmtSignedMoney } from "@/components/margin-ui";
-
-export const AMS_SHORT: Record<string, string> = {
-  "AMS 없음": "없음",
-  "AMS 오픈 18% (최악)": "오픈 18%",
-  "AMS 타겟 20% (최악)": "타겟 20%",
-};
 
 const SKU_SHORT: Record<SkuName, string> = {
   "메인팩 1": "메인팩 1",
@@ -61,7 +55,6 @@ export default function SimTab({
         ? COMPLETE_SKU
         : "combined";
   const cardRow = rowFor(effectiveTarget);
-  const cardAms = effectiveTarget === COMPLETE_SKU ? "AMS 없음" : input.ams;
   const campaignRows = sim.rows.filter((r) => r.sku !== COMPLETE_SKU);
   const completeRow = sim.rows.find((r) => r.sku === COMPLETE_SKU);
 
@@ -73,9 +66,9 @@ export default function SimTab({
   return (
     <>
       <Hint>
-        SKU별 행은 각각 따로 주문, 합계 행은 한 주문(함께 구매)으로 계산합니다. 컴플리트 세트는 캠페인 미진행(상시가·AMS 0%)이고
-        샵 바우처 4종·신규·팔로우만 쓸 수 있으며 별도 주문으로만 계산합니다. 수수료는 바우처 적용 후 결제가 기준이며, 노란 칸에 해당하는
-        왼쪽 입력값만 바꾸면 모든 표가 즉시 다시 계산됩니다.
+        SKU별 행은 각각 따로 주문, 합계 행은 한 주문(함께 구매)으로 계산합니다. 컴플리트 세트는 캠페인 미진행(상시가)이고 샵 바우처
+        4종·신규·팔로우·재구매만 쓸 수 있으며 별도 주문으로만 계산합니다. 라이브 바우처는 해당 SKU 단독 주문 전용입니다. 수수료는 바우처
+        적용 후 결제가 기준이며, 노란 칸에 해당하는 왼쪽 입력값만 바꾸면 모든 표가 즉시 다시 계산됩니다.
       </Hint>
       <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         <Card className="h-fit space-y-4 lg:sticky lg:top-0">
@@ -110,14 +103,6 @@ export default function SimTab({
               )}
             </select>
           </Field>
-          <Field label="AMS">
-            <Segmented
-              size="sm"
-              value={input.ams}
-              onChange={(ams) => onChange({ ...input, ams })}
-              options={AMS_NAMES.map((n) => ({ value: n, label: AMS_SHORT[n] }))}
-            />
-          </Field>
           <Field label="수량">
             <div className="space-y-2">
               {A.skus.map((sku) => {
@@ -127,7 +112,7 @@ export default function SimTab({
                     <span className="text-sm text-gray-700">
                       {sku.name}
                       {skuDiscount(sit, sku.name) === null && <span className="ml-1 text-[11px] text-gray-400">진행 안 함</span>}
-                      {sku.name === COMPLETE_SKU && <span className="ml-1 text-[11px] text-gray-400">별도 주문 · AMS 없음</span>}
+                      {sku.name === COMPLETE_SKU && <span className="ml-1 text-[11px] text-gray-400">별도 주문</span>}
                     </span>
                     <div className="flex items-center rounded-md border border-amber-300 bg-amber-50">
                       <button
@@ -182,6 +167,9 @@ export default function SimTab({
                   {sim.combined.voucherStatus === "미달" && (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">미달</span>
                   )}
+                  {sim.combined.voucherStatus === "대상 아님" && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">대상 아님</span>
+                  )}
                   {appliedVoucher.name}
                 </p>
                 <dl className="mt-1 space-y-0.5 text-xs">
@@ -190,6 +178,7 @@ export default function SimTab({
                   <ReadOnly label="최소 구매액" value={fmtMoney(appliedVoucher.min)} />
                   <ReadOnly label="캡" value={appliedVoucher.cap === 0 ? "없음" : fmtMoney(appliedVoucher.cap)} />
                   <ReadOnly label="쇼피 환급" value={fmtPct(appliedVoucher.refund)} />
+                  {appliedVoucher.sku !== ALL_SKUS && <ReadOnly label="적용 SKU" value={`${appliedVoucher.sku} 전용`} />}
                 </dl>
               </>
             ) : (
@@ -203,8 +192,7 @@ export default function SimTab({
             A={A}
             result={cardRow}
             spike={sim.spike}
-            amsName={cardAms}
-            chip={`${sit.name} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget} · ${AMS_SHORT[cardAms] === "없음" ? "AMS 없음" : `AMS ${AMS_SHORT[cardAms]}`}`}
+            chip={`${sit.name} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget}`}
             payLabel={effectiveTarget === "combined" ? "세트 판매가" : "판매가"}
             vsSeparate={effectiveTarget === "combined" ? sim.combined.vsSeparate : undefined}
             controls={
@@ -277,8 +265,8 @@ export default function SimTab({
               </span>
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              함께 사면 Last Mile 1회, 버라이어티는 애드온가({fmtMoney(A.skus[2].addonPrice ?? 0)}), 바우처는 장바구니 금액 기준.
-              컴플리트 세트는 별도 주문으로만 계산 (AMS 선택과 무관하게 AMS 0%).
+              함께 사면 Last Mile 1회, 버라이어티는 메인팩과 함께 살 때만 애드온가({fmtMoney(A.skus[2].addonPrice ?? 0)}), 바우처는
+              장바구니 금액 기준. SKU 전용 바우처(라이브)는 함께 구매에 적용 안 함. 컴플리트 세트는 별도 주문으로만 계산.
             </p>
           </Card>
 
@@ -309,7 +297,7 @@ function ReadOnly({ label, value }: { label: string; value: string }) {
 
 function VoucherCellLabel({ row }: { row: Settlement }) {
   if (!row.voucher) return <span className="text-gray-400">-</span>;
-  if (row.voucherStatus === "미달" || row.voucherStatus === "적용 불가")
+  if (row.voucherStatus === "미달" || row.voucherStatus === "적용 불가" || row.voucherStatus === "대상 아님")
     return (
       <span className="inline-flex items-center gap-1">
         <span
@@ -422,8 +410,8 @@ function VoucherTable({ A, sim, highlight }: { A: Assumptions; sim: ReturnType<t
     <Card>
       <h2 className="text-sm font-semibold text-gray-900">바우처별 마진표</h2>
       <p className="mb-3 mt-0.5 text-xs text-gray-500">
-        현재 상황·AMS·수량에서 각 바우처를 썼을 때의 마진. &quot;미달&quot;은 최소 구매액 미달, &quot;-&quot;는 결제가 없음, &quot;적용
-        불가&quot;는 컴플리트 세트에 쓸 수 없는 바우처.
+        현재 상황·수량에서 각 바우처를 썼을 때의 마진. &quot;미달&quot;은 최소 구매액 미달, &quot;-&quot;는 결제가 없음, &quot;대상
+        아님&quot;은 다른 SKU 전용 바우처, &quot;적용 불가&quot;는 컴플리트 세트에 쓸 수 없는 바우처.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full whitespace-nowrap text-right text-xs tabular-nums">

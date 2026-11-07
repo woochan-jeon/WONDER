@@ -7,7 +7,7 @@ export default function MarginSimulatorPage() {
       <ChannelHeader
         icon="💹"
         title="마진 시뮬레이터"
-        description="페네핏 쇼피SG 프로모션 상황·바우처·AMS별 마진 계산"
+        description="페네핏 쇼피SG 프로모션 상황·바우처별 마진 계산"
       />
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <MarginSimulator />

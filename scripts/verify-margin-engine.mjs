@@ -1,5 +1,5 @@
-// Checks src/lib/margin-engine.ts against the cached values of the original
-// sheet (PENEFIT_쇼피SG_프로모션_마진시나리오.xlsx). Node 22.18+ strips the
+// Checks src/lib/margin-engine.ts against the 「PENEFIT 쇼피SG 프로모션 마진」 Google Sheet
+// (시뮬레이터·시나리오 목록 탭 표시값, 2026-11-07 조회). Node 22.18+ strips the
 // TypeScript types on import, so no build step is needed:
 //
 //   npm run verify:margin
@@ -12,270 +12,189 @@ import {
   simulate,
 } from "../src/lib/margin-engine.ts";
 
-const EPS = 1e-6;
 let failures = 0;
 let checks = 0;
 
-function eq(label, actual, expected, eps = EPS) {
+function eq(label, actual, expected, eps = 1e-6) {
   checks++;
   const ok =
-    typeof expected === "number" && typeof actual === "number"
-      ? Math.abs(actual - expected) <= eps
-      : actual === expected;
+    typeof expected === "number" && typeof actual === "number" ? Math.abs(actual - expected) <= eps : actual === expected;
   if (!ok) {
     failures++;
     console.error(`✗ ${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
 }
+// 시트 표시값(반올림)과 비교
+const close = (label, actual, expected, digits = 2) =>
+  typeof actual === "number" ? eq(label, Number(actual.toFixed(digits)), expected, 1e-9) : eq(label, actual, expected);
 
 const qty = (m, b, v, c = 0) => ({ "메인팩 1": m, "3팩 번들": b, "버라이어티 단품": v, "컴플리트 세트": c });
 
-// ===== 8.1 시뮬레이터 — 원본 시트 현재 상태 =====
+// ===== 1. 시뮬레이터 — 시트 현재 상태 (11.11 캠페인, 자동, 수량 1·0·1·1) =====
 {
-  const r = simulate(A, {
-    situation: "10.10 (10/9-10/12)",
-    voucher: "10.10 Co-Share 20%",
-    ams: "AMS 타겟 20% (최악)",
-    qty: qty(1, 0, 1),
-  });
-  eq("8.1 feeRate", r.feeRate, 0.359);
+  const r = simulate(A, { situation: "11.11 캠페인 (10/30-11/18)", voucher: AUTO_VOUCHER, qty: qty(1, 0, 1, 1) });
+  close("1 feeRate", r.feeRate, 0.149, 3);
+  eq("1 spike", r.spike, false);
+  // [이름, 행, 바우처, 바우처 할인, 환급, 결제가, 수수료, 상품 비용, 물류, 마진, 마진율, 등급, 손익분기, 최대 누적 할인율]
   const expected = [
-    ["메인팩 1", r.rows[0], "10.10 Co-Share 20%", "적용", 5, 1, 22.8, 8.1852, 5.5043889, 0.609, 9.5014111, 0.4167286, "보통", 9.5372682],
-    ["3팩 번들", r.rows[1], null, "-", 0, 0, 0, 0, 0, 0, 0, 0, "-", 0],
-    ["버라이어티", r.rows[2], "10.10 Co-Share 20%", "미달", 0, 0, 12.8, 4.5952, 3.5369976, 0.609, 4.0588024, 0.3170939, "주의", 6.468015],
-    ["합계", r.combined, "10.10 Co-Share 20%", "적용", 5, 1, 32.6, 11.7034, 9.0413865, 0.609, 12.2462135, 0.3756507, "보통", 15.0552051],
+    ["메인팩 1", r.rows[0], "11.11 Co-Share 20% (S$15↑, 캡 S$5)", 5, 1, 22.8, 3.4, 5.5, 0.61, 14.29, 0.627, "여유", 7.18, 0.742],
+    ["3팩 번들", r.rows[1], null, 0, 0, 0, 0, 0, 0, 0, 0, "-", 0, 0],
+    ["버라이어티", r.rows[2], null, 0, 0, 12.8, 1.91, 3.54, 0.61, 6.75, 0.527, "여유", 4.87, 0.619],
+    ["컴플리트", r.rows[3], "샵 30% (S$80↑, 캡 S$40)", 40, 0, 98.8, 14.72, 33.03, 0.61, 50.44, 0.511, "여유", 39.52, 0.715],
+    ["합계", r.combined, "샵 15% (S$15↑)", 5.64, 0, 31.96, 4.76, 9.04, 0.61, 17.55, 0.549, "여유", 11.34, 0.721],
   ];
-  for (const [name, row, v, st, vd, refund, pay, fee, pc, lg, margin, mr, g, be] of expected) {
-    const p = `8.1 ${name}`;
+  for (const [name, row, v, vd, refund, pay, fee, pc, lg, margin, mr, g, be, maxd] of expected) {
+    const p = `1 ${name}`;
     eq(`${p} voucher`, row.voucher, v);
-    eq(`${p} status`, row.voucherStatus, st);
-    eq(`${p} voucherDiscount`, row.voucherDiscount, vd);
-    eq(`${p} refund`, row.refund, refund);
-    eq(`${p} pay`, row.pay, pay);
-    eq(`${p} fee`, row.fee, fee);
-    eq(`${p} productCost`, row.productCost, pc, 1e-6);
-    eq(`${p} logistics`, row.logistics, lg);
-    eq(`${p} margin`, row.margin, margin, 1e-6);
-    eq(`${p} marginRate`, row.marginRate, mr, 1e-6);
+    close(`${p} voucherDiscount`, row.voucherDiscount, vd);
+    close(`${p} refund`, row.refund, refund);
+    close(`${p} pay`, row.pay, pay);
+    close(`${p} fee`, row.fee, fee);
+    close(`${p} productCost`, row.productCost, pc);
+    close(`${p} logistics`, row.logistics, lg);
+    close(`${p} margin`, row.margin, margin);
+    close(`${p} marginRate`, row.marginRate, mr, 3);
     eq(`${p} grade`, row.grade, g);
-    eq(`${p} breakEvenPay`, row.breakEvenPay, be, 1e-6);
+    close(`${p} breakEvenPay`, row.breakEvenPay, be);
+    close(`${p} maxCumulativeDiscount`, row.maxCumulativeDiscount, maxd, 3);
+    eq(`${p} totalCost = pay − margin`, row.totalCost, row.pay - row.margin);
   }
-  eq("8.1 합계 discountRate", r.combined.discountRate, 0.0738916, 1e-6);
-  eq("8.1 합계 cumulativeDiscount", r.combined.cumulativeDiscount, 0.1970443, 1e-6);
-  eq("8.1 합계 maxCumulativeDiscount", r.combined.maxCumulativeDiscount, 0.6291821, 1e-6);
-  eq("8.1 vsSeparate", r.combined.vsSeparate, -1.314);
+  close("1 합계 discounted (애드온가)", r.combined.discounted, 37.6);
+  close("1 합계 discountRate", r.combined.discountRate, 0.074, 3);
+  close("1 합계 cumulativeDiscount", r.combined.cumulativeDiscount, 0.213, 3);
+  close("1 vsSeparate", r.combined.vsSeparate, -3.49);
 
   const bd = r.combined.breakdown;
-  eq("8.1 breakdown margin", bd.margin, 12.2462135, 1e-6);
-  eq("8.1 breakdown ams", bd.ams, 6.52);
-  eq("8.1 breakdown platformFee", bd.platformFee, 4.1834);
-  eq("8.1 breakdown productCost", bd.productCost, 9.0413865, 1e-6);
-  eq("8.1 breakdown logistics", bd.logistics, 0.609);
-  eq("8.1 breakdown sum = pay", bd.margin + bd.ams + bd.platformFee + bd.productCost + bd.logistics, r.combined.pay);
+  eq("1 breakdown sum = pay", bd.margin + bd.platformFee + bd.productCost + bd.logistics, r.combined.pay);
+  const bdm = r.rows[0].breakdown;
+  eq("1 메인팩 breakdown sum = pay (환급 포함)", bdm.margin + bdm.platformFee + bdm.productCost + bdm.logistics, r.rows[0].pay);
 
   const T = Object.fromEntries(r.voucherTable.map((row) => [row.voucher, row.cells]));
   const vt = {
-    "바우처 없음": [11.7064111, "-", 4.0588024, 14.4512135],
-    "샵 T1 5% (S$30↑)": ["미달", "-", "미달", 13.2461335],
-    "샵 T2 10% (S$50↑)": ["미달", "-", "미달", "미달"],
-    "샵 T3 15% (S$60↑)": ["미달", "-", "미달", "미달"],
-    "샵 T4 20% (S$100↑)": ["미달", "-", "미달", "미달"],
-    "팔로우 S$1": [11.0654111, "-", 3.4178024, 13.8102135],
-    "신규 구매자 S$2 (S$20↑)": [10.4244111, "-", "미달", 13.1692135],
-    "라이브 Early S$5 (S$20↑)": [8.5014111, "-", "미달", 11.2462135],
-    "라이브 Default S$3 (S$20↑)": [9.7834111, "-", "미달", 12.5282135],
-    "라이브 Flash S$5 (S$30↑)": ["미달", "-", "미달", 11.2462135],
-    "라이브 Stock-Up S$8 (S$44↑)": ["미달", "-", "미달", "미달"],
-    "10.10 Co-Share 20%": [9.5014111, "-", "미달", 12.2462135],
-    "10.10 15%": [9.0334411, "-", "미달", 11.2462135],
-    "10.10 18%": [9.7834111, "-", 2.5819384, 12.5282135],
+    "바우처 없음": [17.54, "-", 6.75, 22.35, 84.48],
+    "샵 15% (S$15↑)": [14.0, "-", "미달", 17.55, 66.77],
+    "샵 23% (S$50↑)": ["미달", "-", "미달", "미달", 57.32],
+    "샵 25% (S$60↑)": ["미달", "-", "미달", "미달", 54.95],
+    "샵 30% (S$80↑, 캡 S$40)": ["미달", "-", "미달", "미달", 50.44],
+    "팔로우 S$1 (S$10↑)": [16.69, "-", 5.9, 21.5, 83.63],
+    "신규 구매자 S$2 (S$20↑)": [15.84, "-", "미달", 20.65, 82.78],
+    "재구매자 S$1 (S$15↑)": [16.69, "-", "미달", 21.5, 83.63],
+    "라이브 메인팩 30% (S$14↑, 캡 S$7)": [11.59, "-", "대상 아님", "대상 아님", "적용 불가"],
+    "라이브 3팩 30% (S$60↑, 캡 S$25)": ["대상 아님", "-", "대상 아님", "대상 아님", "적용 불가"],
+    "라이브 버라이어티 S$2 (S$9↑)": ["대상 아님", "-", 5.04, "대상 아님", "적용 불가"],
+    "11.11 Co-Share 20% (S$15↑, 캡 S$5)": [14.29, "-", "미달", 19.09, "적용 불가"],
   };
-  eq("8.1 voucherTable rows", r.voucherTable.length, 14);
-  for (const [name, cells] of Object.entries(vt)) {
-    cells.forEach((c, i) => eq(`8.1 voucherTable ${name}[${i}]`, T[name]?.[i], c, 1e-6));
-  }
+  eq("1 voucherTable rows", r.voucherTable.length, Object.keys(vt).length);
+  // 시트는 컴플리트 열의 '바우처 없음'을 '적용 불가'로 두지만 엔진은 바우처 없이 산 마진(84.48)을 보여준다
+  for (const [name, cells] of Object.entries(vt)) cells.forEach((c, i) => close(`1 voucherTable ${name}[${i}]`, T[name]?.[i], c));
 }
 
-// ===== 8.2 시나리오 목록 =====
+// ===== 2. 자동 바우처 — 라이브·플래시딜 =====
+{
+  // 라이브: SKU 전용 라이브 바우처는 단독 주문에만, 함께 구매는 샵 바우처
+  const r = simulate(A, { situation: "라이브 (11/7·11/8)", voucher: AUTO_VOUCHER, qty: qty(1, 1, 1) });
+  eq("2 라이브 메인 voucher", r.rows[0].voucher, "라이브 메인팩 30% (S$14↑, 캡 S$7)");
+  close("2 라이브 메인 margin", r.rows[0].margin, 6.8);
+  eq("2 라이브 3팩 voucher", r.rows[1].voucher, "샵 15% (S$15↑)"); // 라이브 3팩(S$60↑)은 48.62로 미달
+  eq("2 라이브 버라이어티 voucher", r.rows[2].voucher, "라이브 버라이어티 S$2 (S$9↑)");
+  close("2 라이브 버라이어티 margin", r.rows[2].margin, 2.87);
+  eq("2 라이브 합계 voucher 샵", r.combined.voucher?.startsWith("샵"), true);
+
+  // 라이브 바우처를 직접 골라도 함께 구매에는 '대상 아님'
+  const m = simulate(A, { situation: "라이브 (11/7·11/8)", voucher: "라이브 메인팩 30% (S$14↑, 캡 S$7)", qty: qty(1, 0, 1) });
+  eq("2 직접 선택 합계 status", m.combined.voucherStatus, "대상 아님");
+  eq("2 직접 선택 합계 voucherDiscount", m.combined.voucherDiscount, 0);
+  eq("2 직접 선택 버라이어티 status", m.rows[2].voucherStatus, "대상 아님");
+  eq("2 직접 선택 메인 status", m.rows[0].voucherStatus, "적용");
+
+  // 플래시딜: 버라이어티 진행 안 함, 3팩 번들과 함께 사도 버라이어티 애드온가 없음
+  const f = simulate(A, { situation: "샵 플래시딜 18%", voucher: AUTO_VOUCHER, qty: qty(1, 1, 1) });
+  eq("2 플래시 버라이어티 pay", f.rows[2].pay, 0);
+  close("2 플래시 메인 discounted", f.rows[0].discounted, 22.8);
+  close("2 플래시 3팩 discounted", f.rows[1].discounted, 61.34);
+
+  const b = simulate(A, { situation: "평시", voucher: AUTO_VOUCHER, qty: qty(0, 1, 1) });
+  close("2 3팩+버라이어티 = 상시가 (애드온 없음)", b.combined.discounted, 74.8 + 12.8);
+}
+
+// ===== 3. 시나리오 목록 (시트 표시값) =====
 {
   const list = scenarioList(A);
-  eq("8.2 row count", list.length, 147);
-  const counts = {};
-  for (const r of list) counts[r.situation] = (counts[r.situation] ?? 0) + 1;
-  const expectedCounts = {
-    // 각 상황 + 컴플리트 세트 7행 (바우처 없음 + 컴플리트 적용 6종)
-    "평시": 28,
-    "라이브 기본 (1·2·5회)": 22,
-    "라이브 스페셜 (3·4·6회)": 22,
-    "옥션": 9,
-    "10.10 (10/9-10/12)": 19,
-    "10.10 (10/13-10/17)": 19,
-    "10.18 GDD": 28,
-  };
-  for (const [s, n] of Object.entries(expectedCounts)) eq(`8.2 count ${s}`, counts[s], n);
-
+  const find = (sit, sku, v) => list.find((r) => r.situation === sit && r.sku === sku && r.voucher === v);
+  // [상황, SKU, 바우처, 적용, 결제가, 마진]
   const samples = [
-    ["평시", "메인팩 1", "바우처 없음", "-", 27.8, 17.5444111, 0.6310939, "여유", 12.5404111, 11.9844111],
-    ["평시", "메인팩 1", "샵 T1 5% (S$30↑)", "미달", 27.8, 17.5444111, 0.6310939, "여유", 12.5404111, 11.9844111],
-    ["평시", "메인팩 1", "팔로우 S$1", "적용", 26.8, 16.6934111, 0.6228885, "여유", 11.8694111, 11.3334111],
-    ["평시", "3팩 번들", "샵 T3 15% (S$60↑)", "적용", 63.58, 37.0610437, 0.5829041, "여유", 25.6166437, 24.3450437],
-    ["평시", "버라이어티 단품", "바우처 없음", "-", 12.8, 6.7468024, 0.5270939, "여유", 4.4428024, 4.1868024],
+    ["평시", "메인팩 1", "바우처 없음", "-", 27.8, 17.54],
+    ["평시", "메인팩 1", "샵 15% (S$15↑)", "적용", 23.63, 14.0],
+    ["평시", "메인팩 1", "샵 30% (S$80↑, 캡 S$40)", "미달", 27.8, 17.54],
+    ["평시", "3팩 번들", "샵 25% (S$60↑)", "적용", 56.1, 30.7],
+    ["평시", "버라이어티 단품", "팔로우 S$1 (S$10↑)", "적용", 11.8, 5.9],
+    ["평시", "버라이어티 단품", "재구매자 S$1 (S$15↑)", "미달", 12.8, 6.75],
+    ["라이브 (11/7·11/8)", "메인팩 1", "라이브 메인팩 30% (S$14↑, 캡 S$7)", "적용", 15.18, 6.8],
+    ["라이브 (11/7·11/8)", "3팩 번들", "라이브 3팩 30% (S$60↑, 캡 S$25)", "미달", 48.62, 24.33],
+    ["라이브 (11/7·11/8)", "버라이어티 단품", "라이브 버라이어티 S$2 (S$9↑)", "적용", 8.24, 2.87],
+    ["샵 플래시딜 10%", "메인팩 1", "11.11 Co-Share 20% (S$15↑, 캡 S$5)", "적용", 20.02, 11.92],
+    ["샵 플래시딜 10%", "3팩 번들", "샵 25% (S$60↑)", "적용", 50.49, 25.92],
+    ["샵 플래시딜 15%", "메인팩 1", "11.11 Co-Share 20% (S$15↑, 캡 S$5)", "적용", 18.9, 10.92],
+    ["샵 플래시딜 18%", "3팩 번들", "샵 23% (S$50↑)", "적용", 47.23, 23.15],
+    ["11.11 캠페인 (10/30-11/18)", "3팩 번들", "11.11 Co-Share 20% (S$15↑, 캡 S$5)", "적용", 69.8, 43.35],
+    ["11.11 캠페인 (10/30-11/18)", "버라이어티 단품", "11.11 Co-Share 20% (S$15↑, 캡 S$5)", "미달", 12.8, 6.75],
+    ["11.11 당일", "메인팩 1", "바우처 없음", "-", 27.8, 17.27],
+    ["11.11 당일", "3팩 번들", "11.11 Co-Share 20% (S$15↑, 캡 S$5)", "적용", 69.8, 42.66],
+    ["11.11 당일", "버라이어티 단품", "바우처 없음", "-", 12.8, 6.62],
+    ["평시", "컴플리트 세트", "바우처 없음", "-", 138.8, 84.48],
+    ["평시", "컴플리트 세트", "샵 30% (S$80↑, 캡 S$40)", "적용", 98.8, 50.44],
+    ["평시", "컴플리트 세트", "재구매자 S$1 (S$15↑)", "적용", 137.8, 83.63],
+    ["11.11 당일", "컴플리트 세트", "바우처 없음", "-", 138.8, 83.1],
+    ["11.11 당일", "컴플리트 세트", "샵 30% (S$80↑, 캡 S$40)", "적용", 98.8, 49.46],
+    ["11.11 당일", "컴플리트 세트", "신규 구매자 S$2 (S$20↑)", "적용", 136.8, 81.41],
   ];
-  for (const [sit, sku, v, st, pay, margin, mr, g, m18, m20] of samples) {
-    const p = `8.2 ${sit}/${sku}/${v}`;
-    const row = list.find((r) => r.situation === sit && r.sku === sku && r.voucher === v);
+  for (const [sit, sku, v, st, pay, margin] of samples) {
+    const p = `3 ${sit}/${sku}/${v}`;
+    const row = find(sit, sku, v);
     if (!row) {
       failures++;
       console.error(`✗ ${p}: row missing`);
       continue;
     }
     eq(`${p} status`, row.voucherStatus, st);
-    eq(`${p} pay`, row.pay, pay);
-    eq(`${p} margin`, row.margin, margin, 1e-6);
-    eq(`${p} marginRate`, row.marginRate, mr, 1e-6);
-    eq(`${p} grade`, row.grade, g);
-    eq(`${p} AMS18`, row.marginAmsOpen, m18, 1e-6);
-    eq(`${p} AMS20`, row.marginAmsTarget, m20, 1e-6);
+    close(`${p} pay`, row.pay, pay);
+    close(`${p} margin`, row.margin, margin);
   }
-}
+  close("3 메인팩 주문 고정비", find("평시", "메인팩 1", "바우처 없음")?.orderFixedCost, 6.11);
+  close("3 컴플리트 주문 고정비", find("평시", "컴플리트 세트", "바우처 없음")?.orderFixedCost, 33.64);
 
-// ===== 8.3 자동 바우처 (표시값 반올림 비교) =====
-{
-  const close = (label, actual, expected, digits) => eq(label, Number(actual.toFixed(digits)), expected, 1e-9);
-  const cases = [
-    {
-      input: { situation: "10.10 (10/9-10/12)", ams: "AMS 타겟 20% (최악)", qty: qty(1, 0, 1) },
-      rows: [
-        ["메인팩 1", 0, "10.10 Co-Share 20%", 22.8, 9.5, 0.417, "보통"],
-        ["버라이어티", 2, "10.10 18%", 10.5, 2.58, 0.246, "주의"],
-        ["합계", "combined", "10.10 Co-Share 20%", 32.6, 12.25, 0.376, "보통"],
-      ],
-    },
-    {
-      input: { situation: "라이브 스페셜 (3·4·6회)", ams: "AMS 없음", qty: qty(2, 1, 1) },
-      rows: [
-        ["메인팩 1", 0, "라이브 Early S$5 (S$20↑)", 38.37, 20.65, 0.538, "여유"],
-        ["3팩 번들", 1, "라이브 Stock-Up S$8 (S$44↑)", 40.62, 17.12, 0.421, "보통"],
-        ["버라이어티", 2, null, 10.24, 4.47, 0.436, "보통"],
-        ["합계", "combined", "샵 T4 20% (S$100↑)", 81.43, 36.89, 0.453, "보통"],
-      ],
-    },
-    {
-      input: { situation: "옥션", ams: "AMS 오픈 18% (최악)", qty: qty(1, 0, 1) },
-      rows: [
-        ["메인팩 1", 0, null, 13.9, 3.07, 0.221, "위험"],
-        ["버라이어티", 2, null, 0, 0, 0, "-"],
-      ],
-    },
-  ];
-  for (const { input, rows } of cases) {
-    const r = simulate(A, { ...input, voucher: AUTO_VOUCHER });
-    for (const [name, idx, v, pay, margin, mr, g] of rows) {
-      const row = idx === "combined" ? r.combined : r.rows[idx];
-      const p = `8.3 ${input.situation} ${name}`;
-      eq(`${p} voucher`, row.voucher, v);
-      close(`${p} pay`, row.pay, pay, 2);
-      close(`${p} margin`, row.margin, margin, 2);
-      close(`${p} marginRate`, row.marginRate, mr, 3);
-      eq(`${p} grade`, row.grade, g);
-    }
-  }
-}
-
-// ===== 8.4 컴플리트 세트 (구글 시트 표시값 반올림 비교) =====
-{
-  const close = (label, actual, expected, digits) => eq(label, Number(actual.toFixed(digits)), expected, 1e-9);
-
-  // 시뮬레이터 15행: 10.10 스파이크, 샵 T4, AMS 타겟 20% 선택 — 컴플리트는 AMS 0%
-  const r = simulate(A, { situation: "10.10 (10/9-10/12)", voucher: "샵 T4 20% (S$100↑)", ams: "AMS 타겟 20% (최악)", qty: qty(0, 0, 0, 1) });
-  const c = r.rows[3];
-  eq("8.4 sku", c.sku, "컴플리트 세트");
-  eq("8.4 voucher", c.voucher, "샵 T4 20% (S$100↑)");
-  eq("8.4 status", c.voucherStatus, "적용");
-  close("8.4 listTotal", c.listTotal, 138.8, 2);
-  close("8.4 discounted", c.discounted, 138.8, 2);
-  close("8.4 voucherDiscount", c.voucherDiscount, 27.76, 2);
-  close("8.4 pay", c.pay, 111.04, 2);
-  close("8.4 feeRate", c.feeRate, 0.159, 3);
-  close("8.4 fee", c.fee, 17.66, 2);
-  close("8.4 productCost", c.productCost, 33.03, 2);
-  close("8.4 logistics", c.logistics, 0.61, 2);
-  close("8.4 margin", c.margin, 59.75, 2);
-  close("8.4 marginRate", c.marginRate, 0.538, 3);
-  eq("8.4 grade", c.grade, "여유");
-  close("8.4 breakEvenPay", c.breakEvenPay, 39.99, 2);
-  close("8.4 maxCumulativeDiscount", c.maxCumulativeDiscount, 0.712, 3);
-  eq("8.4 combined excludes complete", r.combined.pay, 0);
-
-  const T = Object.fromEntries(r.voucherTable.map((row) => [row.voucher, row.cells[4]]));
-  const vt = {
-    "샵 T1 5% (S$30↑)": 77.26,
-    "샵 T2 10% (S$50↑)": 71.42,
-    "샵 T3 15% (S$60↑)": 65.59,
-    "샵 T4 20% (S$100↑)": 59.75,
-    "팔로우 S$1": 82.25,
-    "신규 구매자 S$2 (S$20↑)": 81.41,
-    "라이브 Early S$5 (S$20↑)": "적용 불가",
-    "라이브 Stock-Up S$8 (S$44↑)": "적용 불가",
-    "10.10 Co-Share 20%": "적용 불가",
-    "10.10 18%": "적용 불가",
-  };
-  for (const [name, v] of Object.entries(vt)) {
-    if (typeof v === "number") close(`8.4 voucherTable ${name}`, T[name], v, 2);
-    else eq(`8.4 voucherTable ${name}`, T[name], v);
-  }
-
-  // 자동: 상황 구분 무관하게 컴플리트 적용 바우처 중 최대 (옥션 = 바우처 구분 '없음'이어도 샵 T4)
-  const auto = simulate(A, { situation: "옥션", voucher: AUTO_VOUCHER, ams: "AMS 오픈 18% (최악)", qty: qty(0, 0, 0, 1) }).rows[3];
-  eq("8.4 auto voucher", auto.voucher, "샵 T4 20% (S$100↑)");
-  close("8.4 auto margin", auto.margin, 59.75, 2);
-
-  // 라이브 바우처를 직접 고르면 적용 불가 (할인 0)
-  const live = simulate(A, { situation: "라이브 기본 (1·2·5회)", voucher: "라이브 Early S$5 (S$20↑)", ams: "AMS 없음", qty: qty(0, 0, 0, 1) }).rows[3];
-  eq("8.4 live status", live.voucherStatus, "적용 불가");
-  close("8.4 live pay", live.pay, 138.8, 2);
-  close("8.4 live margin", live.margin, 84.48, 2);
-
-  // 시나리오 목록 컴플리트 행
-  const list = scenarioList(A);
-  const samples = [
-    ["평시", "바우처 없음", "-", 138.8, 84.48, 0.609, "여유"],
-    ["평시", "샵 T4 20% (S$100↑)", "적용", 111.04, 60.86, 0.548, "여유"],
-    ["라이브 스페셜 (3·4·6회)", "신규 구매자 S$2 (S$20↑)", "적용", 136.8, 81.41, 0.595, "여유"],
-    ["옥션", "샵 T1 5% (S$30↑)", "적용", 131.86, 77.26, 0.586, "여유"],
-    ["10.18 GDD", "팔로우 S$1", "적용", 137.8, 83.63, 0.607, "여유"],
-  ];
-  for (const [sit, v, st, pay, margin, mr, g] of samples) {
-    const p = `8.4 list ${sit}/${v}`;
-    const row = list.find((x) => x.situation === sit && x.sku === "컴플리트 세트" && x.voucher === v);
-    if (!row) {
-      failures++;
-      console.error(`✗ ${p}: row missing`);
-      continue;
-    }
-    eq(`${p} status`, row.voucherStatus, st);
-    close(`${p} pay`, row.pay, pay, 2);
-    close(`${p} margin`, row.margin, margin, 2);
-    close(`${p} marginRate`, row.marginRate, mr, 3);
-    eq(`${p} grade`, row.grade, g);
-    eq(`${p} AMS18`, row.marginAmsOpen, null);
-    close(`${p} orderFixedCost`, row.orderFixedCost, 33.64, 2);
-  }
-  eq("8.4 list no live vouchers", list.some((x) => x.sku === "컴플리트 세트" && x.voucher?.startsWith("라이브")), false);
+  // 컴플리트 세트는 평시·11.11 당일 두 상황만, 라이브·11.11 바우처 없음
+  const complete = list.filter((r) => r.sku === "컴플리트 세트");
+  eq("3 컴플리트 상황", [...new Set(complete.map((r) => r.situation))].join(), "평시,11.11 당일");
+  eq("3 컴플리트 행 수", complete.length, 16); // 상황당 바우처 없음 + 컴플리트 적용 7종
+  eq("3 컴플리트 non-complete 바우처 없음", complete.some((r) => r.voucher?.startsWith("라이브") || r.voucher?.startsWith("11.11")), false);
+  // 플래시딜엔 버라이어티 없음, 라이브 바우처는 그 SKU에만
+  eq("3 플래시딜 버라이어티 없음", list.some((r) => r.situation.startsWith("샵 플래시딜") && r.sku === "버라이어티 단품"), false);
+  eq(
+    "3 라이브 바우처 SKU 전용",
+    list.some((r) => r.voucher === "라이브 3팩 30% (S$60↑, 캡 S$25)" && r.sku !== "3팩 번들"),
+    false,
+  );
+  eq("3 옛 프로모션 없음", list.some((r) => /10\.10|10\.18|옥션|T[1-4]/.test(`${r.situation} ${r.voucher}`)), false);
 }
 
 // ===== 저장값 검증 =====
 eq("parseAssumptions(defaults)", parseAssumptions(JSON.parse(JSON.stringify(A))) !== null, true);
 eq("parseAssumptions(garbage)", parseAssumptions({ fees: 1 }), null);
 {
-  // 컴플리트 세트 추가 전 저장값: SKU 3개, 바우처에 complete 없음
+  // 예전 형식: AMS 포함, 바우처에 sku 없음, SKU 3개
   const old = JSON.parse(JSON.stringify(A));
+  old.ams = { "AMS 없음": 0 };
   old.skus = old.skus.slice(0, 3);
-  for (const v of old.vouchers) delete v.complete;
+  for (const v of old.vouchers) {
+    delete v.sku;
+    delete v.complete;
+  }
   const migrated = parseAssumptions(old);
   eq("parseAssumptions(old) ok", migrated !== null, true);
-  eq("parseAssumptions(old) skus", JSON.stringify(migrated.skus), JSON.stringify(A.skus));
-  eq("parseAssumptions(old) complete flags", migrated.vouchers.map((v) => v.complete).join(), A.vouchers.map((v) => v.complete).join());
+  eq("parseAssumptions(old) ams 제거", migrated && "ams" in migrated, false);
+  eq("parseAssumptions(old) skus", JSON.stringify(migrated?.skus), JSON.stringify(A.skus));
+  eq("parseAssumptions(old) sku 기본값", migrated?.vouchers.every((v) => v.sku === "전체"), true);
 }
 
 if (failures) {

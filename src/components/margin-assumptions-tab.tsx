@@ -2,8 +2,9 @@
 
 import { useRef, useState } from "react";
 import {
-  AMS_NAMES,
+  ALL_SKUS,
   NO_VOUCHER,
+  SKU_NAMES,
   SITUATION_VOUCHER_GROUPS,
   CAMPAIGN_SKUS,
   VOUCHER_GROUPS,
@@ -71,7 +72,7 @@ export default function AssumptionsTab({
     update((x) => {
       let n = 1;
       while (x.vouchers.some((v) => v.name === `새 바우처 ${n}`)) n++;
-      x.vouchers.push({ name: `새 바우처 ${n}`, group: "샵", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false, complete: false });
+      x.vouchers.push({ name: `새 바우처 ${n}`, group: "샵", type: "fixed", value: 0, min: 0, cap: 0, refund: 0, auto: false, complete: false, sku: ALL_SKUS });
     });
 
   const th = "px-2 py-2 text-left font-medium text-gray-500";
@@ -154,15 +155,6 @@ export default function AssumptionsTab({
                 onChange={(v) => update((x) => void (x.fees.spikeDayExtra = v))}
               />
             </Row>
-          </div>
-
-          <h2 className="mb-3 mt-6 text-sm font-semibold text-gray-900">AMS 선택지</h2>
-          <div className="space-y-2">
-            {AMS_NAMES.map((n) => (
-              <Row key={n} label={n}>
-                <NumField value={A.ams[n]} scale={100} suffix="%" onChange={(v) => update((x) => void (x.ams[n] = v))} />
-              </Row>
-            ))}
           </div>
         </Card>
 
@@ -365,7 +357,8 @@ export default function AssumptionsTab({
           <div>
             <h2 className="text-sm font-semibold text-gray-900">바우처</h2>
             <p className="mt-0.5 text-xs text-gray-500">
-              순서가 의미 있습니다 — 자동 선택에서 할인액이 같으면 위에 있는 것을 고릅니다. 캡 0 = 상한 없음.
+              순서가 의미 있습니다 — 자동 선택에서 할인액이 같으면 위에 있는 것을 고릅니다. 캡 0 = 상한 없음. 적용 SKU가 정해진
+              바우처(라이브)는 그 SKU 단독 주문에만 적용됩니다.
             </p>
           </div>
           <button
@@ -390,6 +383,7 @@ export default function AssumptionsTab({
                 <th className={th}>쇼피 환급</th>
                 <th className={th}>자동 선택</th>
                 <th className={th}>컴플리트 적용</th>
+                <th className={th}>적용 SKU</th>
                 <th className={th}>비고</th>
                 <th className={th} />
               </tr>
@@ -428,7 +422,7 @@ export default function AssumptionsTab({
                       )}
                     </td>
                     {locked ? (
-                      <td colSpan={8} className={`${td} text-xs text-gray-400`}>
+                      <td colSpan={9} className={`${td} text-xs text-gray-400`}>
                         고정 항목
                       </td>
                     ) : (
@@ -494,6 +488,18 @@ export default function AssumptionsTab({
                             checked={v.complete}
                             onChange={(e) => update((x) => void (x.vouchers[i].complete = e.target.checked))}
                           />
+                        </td>
+                        <td className={td}>
+                          <select
+                            value={v.sku}
+                            aria-label={`${v.name} 적용 SKU`}
+                            onChange={(e) => update((x) => void (x.vouchers[i].sku = e.target.value))}
+                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+                          >
+                            {[ALL_SKUS, ...SKU_NAMES].map((n) => (
+                              <option key={n}>{n}</option>
+                            ))}
+                          </select>
                         </td>
                       </>
                     )}
