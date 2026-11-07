@@ -7,6 +7,7 @@
 import {
   AUTO_VOUCHER,
   DEFAULT_ASSUMPTIONS as A,
+  NO_VOUCHER as NO_VOUCHER_NAME,
   parseAssumptions,
   scenarioList,
   simulate,
@@ -115,6 +116,21 @@ const qty = (m, b, v, c = 0) => ({ "메인팩 1": m, "3팩 번들": b, "버라�
 
   const b = simulate(A, { situation: "평시", voucher: AUTO_VOUCHER, qty: qty(0, 1, 1) });
   close("2 3팩+버라이어티 = 상시가 (애드온 없음)", b.combined.discounted, 74.8 + 12.8);
+}
+
+// ===== 2b. 수기 할인율: 상황 할인율 대신 모든 SKU에, 애드온가 없음, 바우처는 따로 =====
+{
+  const r = simulate(A, { situation: "샵 플래시딜 18%", voucher: NO_VOUCHER_NAME, discount: 0.2, qty: qty(1, 0, 1, 1) });
+  close("2b 메인 discounted", r.rows[0].discounted, 22.24);
+  close("2b 메인 discountRate", r.rows[0].discountRate, 0.2, 3);
+  close("2b 버라이어티 (플래시딜 미진행이어도 수기면 계산)", r.rows[2].discounted, 10.24);
+  close("2b 컴플리트도 수기 할인", r.rows[3].discounted, 111.04);
+  close("2b 합계 애드온가 없음", r.combined.discounted, 22.24 + 10.24);
+  const v = simulate(A, { situation: "평시", voucher: "샵 15% (S$15↑)", discount: 0.1, qty: qty(1, 0, 0) }).rows[0];
+  close("2b 할인 후 바우처", v.voucherDiscount, 3.75); // 25.02 × 15%
+  close("2b 누적 할인율", v.cumulativeDiscount, 0.235, 3);
+  const n = simulate(A, { situation: "라이브 (11/7·11/8)", voucher: AUTO_VOUCHER, discount: null, qty: qty(1, 0, 0) }).rows[0];
+  close("2b null = 상황 할인율", n.discountRate, 0.22, 3);
 }
 
 // ===== 3. 시나리오 목록 (시트 표시값) =====

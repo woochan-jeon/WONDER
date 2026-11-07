@@ -22,13 +22,14 @@ type Seg = { key: SegKey; label: string; value: number; color: string; detail: s
 
 // 상시가가 어디로 나가는지 보여주는 가로 누적 막대 카드.
 // 네 세그먼트(마진·플랫폼 수수료·상품 원가·물류)의 합 = 결제가,
-// 여기에 바우처 할인·캠페인(상황) 할인을 더하면 = 상시가 합계.
+// 여기에 바우처 할인·할인(상황 또는 수기)을 더하면 = 상시가 합계.
 export default function ProfitCard({
   A,
   result,
   spike,
   chip,
   payLabel,
+  discountSource = "상황 할인",
   vsSeparate,
   controls,
   footer,
@@ -38,6 +39,7 @@ export default function ProfitCard({
   spike: boolean;
   chip: string;
   payLabel: string;
+  discountSource?: string; // 할인 세그먼트 설명 ("상황 할인" | "수기 할인")
   vsSeparate?: number;
   controls?: React.ReactNode;
   footer?: React.ReactNode;
@@ -117,12 +119,12 @@ export default function ProfitCard({
   };
   const campaignSeg: Seg = {
     key: "campaign",
-    label: "캠페인 할인",
+    label: "할인",
     value: campaignValue,
     color: COLORS.campaign,
     striped: true,
-    detail: `캠페인 할인 ${fmtMoney(campaignValue)} (상시가 대비 ${fmtPct(pctOfList(campaignValue))}) — 상황 할인${
-      payLabel === "세트 판매가" ? "·애드온가" : ""
+    detail: `할인 ${fmtMoney(campaignValue)} (상시가 대비 ${fmtPct(pctOfList(campaignValue))}) — ${discountSource}${
+      payLabel === "세트 판매가" && discountSource === "상황 할인" ? "·애드온가" : ""
     } 적용`,
   };
   const discountSegs = [voucherSeg, campaignSeg];
@@ -188,6 +190,14 @@ export default function ProfitCard({
             <div className="mt-4 flex items-baseline justify-between gap-2">
               <span className="text-xs text-gray-600">판매가 대비 마진율</span>
               <span className={`text-lg font-semibold tabular-nums ${marginColor}`}>{fmtPct(result.marginRate)}</span>
+            </div>
+            {/* 할인과 바우처를 나눠 보여준다 (상시가 대비). 누적 = 1 − 결제가 ÷ 상시가 */}
+            <div className="mt-1 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs tabular-nums text-gray-600">
+              <RateItem color={COLORS.campaign} label={discountSource === "수기 할인" ? "할인율 (수기)" : "할인율"} value={pctOfList(campaignValue)} />
+              <RateItem color={COLORS.voucher} label="바우처" value={pctOfList(voucherValue)} />
+              <span>
+                누적 할인율 <span className="font-semibold text-gray-900">{fmtPct(result.cumulativeDiscount)}</span>
+              </span>
             </div>
 
             <div className={`relative mt-2 ${payMarker !== null ? "pt-5" : ""}`}>
@@ -265,8 +275,8 @@ export default function ProfitCard({
 
             <div className="mt-2 border-t border-gray-200 pt-2">
               <p className="mb-1 text-[11px] text-gray-500">
-                상시가 {fmtMoney(listTotal)} = 결제가 {fmtMoney(pay)} + 바우처 할인 {fmtMoney(voucherValue)} + 캠페인 할인{" "}
-                {fmtMoney(campaignValue)}
+                상시가 {fmtMoney(listTotal)} = 결제가 {fmtMoney(pay)} + 할인 {fmtMoney(campaignValue)} + 바우처 할인{" "}
+                {fmtMoney(voucherValue)}
               </p>
               <ul className="flex flex-wrap gap-x-4 gap-y-1">
                 {discountSegs.map((s) => (
@@ -318,6 +328,15 @@ function Kpi({
       <p className="truncate text-xs text-gray-500">{label}</p>
       <p className={`truncate text-base font-semibold tabular-nums sm:text-xl ${valueClass}`}>{value}</p>
     </div>
+  );
+}
+
+function RateItem({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundImage: stripes(color) }} aria-hidden />
+      {label} <span className="font-semibold text-gray-900">{fmtPct(value)}</span>
+    </span>
   );
 }
 

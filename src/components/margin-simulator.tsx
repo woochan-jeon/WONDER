@@ -55,11 +55,15 @@ function readUrl(): { tab: Tab; input: SimInput } {
   const p = new URLSearchParams(window.location.search);
   const tab = TABS.some((t) => t.id === p.get("tab")) ? (p.get("tab") as Tab) : "sim";
   const q = (p.get("q") ?? "").split(",").map(Number);
+  // 수기 할인율 (?d=12.5 → 12.5%). 없으면 상황 할인율
+  const d = Number(p.get("d"));
+  const discountOk = p.has("d") && p.get("d") !== "" && Number.isFinite(d);
   // 컴플리트 세트 추가 전 링크(수량 3개)도 그대로 열린다
   const qtyOk = (q.length === SKU_NAMES.length || q.length === SKU_NAMES.length - 1) && q.every((n) => Number.isFinite(n));
   const input: SimInput = {
     situation: p.get("sit") ?? DEFAULT_INPUT.situation,
     voucher: p.get("v") ?? DEFAULT_INPUT.voucher,
+    discount: discountOk ? Math.min(100, Math.max(0, d)) / 100 : null,
     qty: qtyOk
       ? (Object.fromEntries(SKU_NAMES.map((n, i) => [n, Math.min(20, Math.max(0, q[i] ?? 0))])) as SimInput["qty"])
       : DEFAULT_INPUT.qty,
@@ -81,6 +85,7 @@ export default function MarginSimulator() {
     if (tab !== "sim") p.set("tab", tab);
     p.set("sit", input.situation);
     p.set("v", input.voucher);
+    if (input.discount != null) p.set("d", String(Number((input.discount * 100).toPrecision(12))));
     p.set("q", SKU_NAMES.map((n) => input.qty[n] ?? 0).join(","));
     window.history.replaceState(null, "", `${window.location.pathname}?${p.toString()}`);
   }, [tab, input]);

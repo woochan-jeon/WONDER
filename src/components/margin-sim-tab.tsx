@@ -45,6 +45,7 @@ export default function SimTab({
   const [cardTarget, setCardTarget] = useState<CardTarget>("combined");
   const sim = simulate(A, input);
   const sit = findSituation(A, input.situation) ?? A.situations[0];
+  const manual = input.discount ?? null;
 
   const rowFor = (t: CardTarget): Settlement => (t === "combined" ? sim.combined : sim.rows[SKU_NAMES.indexOf(t)]);
   // 고른 대상에 결제가가 없으면 한 주문, 그것도 없으면 (컴플리트 세트만 담은 경우) 컴플리트 세트
@@ -103,6 +104,14 @@ export default function SimTab({
               )}
             </select>
           </Field>
+          <Field label="할인율 (수기, 상시가 대비)">
+            <DiscountField value={manual} onChange={(discount) => onChange({ ...input, discount })} />
+            <p className="mt-1 text-[11px] text-gray-500">
+              {manual === null
+                ? "비우면 상황 할인율을 씁니다. 바우처는 할인가에 따로 적용됩니다."
+                : "모든 SKU(컴플리트 포함)에 같은 할인율을 적용하고 애드온가는 쓰지 않습니다. 바우처는 할인가에 따로 적용됩니다."}
+            </p>
+          </Field>
           <Field label="수량">
             <div className="space-y-2">
               {A.skus.map((sku) => {
@@ -111,7 +120,9 @@ export default function SimTab({
                   <div key={sku.name} className="flex items-center justify-between gap-2">
                     <span className="text-sm text-gray-700">
                       {sku.name}
-                      {skuDiscount(sit, sku.name) === null && <span className="ml-1 text-[11px] text-gray-400">진행 안 함</span>}
+                      {manual === null && skuDiscount(sit, sku.name) === null && (
+                        <span className="ml-1 text-[11px] text-gray-400">진행 안 함</span>
+                      )}
                       {sku.name === COMPLETE_SKU && <span className="ml-1 text-[11px] text-gray-400">별도 주문</span>}
                     </span>
                     <div className="flex items-center rounded-md border border-amber-300 bg-amber-50">
@@ -192,7 +203,8 @@ export default function SimTab({
             A={A}
             result={cardRow}
             spike={sim.spike}
-            chip={`${sit.name} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget}`}
+            chip={`${sit.name}${manual === null ? "" : ` · 수기 할인 ${fmtPct(manual)}`} · ${effectiveTarget === "combined" ? "한 주문" : effectiveTarget}`}
+            discountSource={manual === null ? "상황 할인" : "수기 할인"}
             payLabel={effectiveTarget === "combined" ? "세트 판매가" : "판매가"}
             vsSeparate={effectiveTarget === "combined" ? sim.combined.vsSeparate : undefined}
             controls={
@@ -218,7 +230,7 @@ export default function SimTab({
                       "SKU",
                       "수량",
                       "상시가 합계",
-                      "상황 할인율",
+                      "할인율",
                       "할인가 합계",
                       "적용 바우처",
                       "바우처 할인",
@@ -274,6 +286,57 @@ export default function SimTab({
         </div>
       </div>
     </>
+  );
+}
+
+// 수기 할인율 입력 (%). 비우면 null = 상황 할인율 사용
+function DiscountField({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const fmt = (v: number | null) => (v === null ? "" : String(Number((v * 100).toPrecision(12))));
+  const parse = (s: string): number | null => {
+    if (s.trim() === "") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) / 100 : null;
+  };
+  const [draft, setDraft] = useState(() => fmt(value));
+  // 바깥에서 값이 바뀌면(지우기 버튼·시나리오에서 열기) 입력칸도 맞춘다
+  if (parse(draft) !== value) setDraft(fmt(value));
+  return (
+    <div className="flex items-center gap-1">
+      <div className="flex flex-1 items-center rounded-md border border-amber-300 bg-amber-50 pr-2">
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={100}
+          step="any"
+          aria-label="수기 할인율"
+          placeholder="상황 할인율 사용"
+          value={draft}
+          onChange={(e) => {
+            const raw = e.target.value;
+            const n = Number(raw);
+            // 0~100 밖이면 잘라낸 값으로 입력칸도 맞춘다
+            setDraft(raw.trim() !== "" && (n < 0 || n > 100) ? fmt(parse(raw)) : raw);
+            onChange(parse(raw));
+          }}
+          className="h-8 w-full min-w-0 bg-transparent px-2 text-right text-sm tabular-nums focus:outline-none"
+        />
+        <span className="text-xs text-gray-500">%</span>
+      </div>
+      {value !== null && (
+        <button
+          type="button"
+          aria-label="수기 할인율 지우기"
+          onClick={() => {
+            setDraft("");
+            onChange(null);
+          }}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100"
+        >
+          ✕
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -347,7 +410,7 @@ function SimMobileCard({ label, qty, row, bold }: { label: string; qty: number; 
   const neg = row.margin < 0 ? "text-red-600" : "text-gray-900";
   const details: [string, React.ReactNode][] = [
     ["상시가 합계", fmtMoney(row.listTotal)],
-    ["상황 할인율", fmtPct(row.discountRate)],
+    ["할인율", fmtPct(row.discountRate)],
     ["할인가 합계", fmtMoney(row.discounted)],
     ["적용 바우처", <VoucherCellLabel key="v" row={row} />],
     ["바우처 할인", fmtMoney(row.voucherDiscount)],

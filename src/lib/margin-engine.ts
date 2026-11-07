@@ -316,6 +316,8 @@ function settle(A: Assumptions, { listTotal, discounted, productCost, logistics,
 export type SimInput = {
   situation: string;
   voucher: string; // AUTO_VOUCHER | 바우처명
+  // 수기 할인율 (상시가 대비, 0~1). 넣으면 상황 할인율 대신 모든 SKU에 같은 할인율을 쓴다. null/생략 = 상황 할인율
+  discount?: number | null;
   qty: Record<SkuName, number>;
 };
 
@@ -339,9 +341,10 @@ export const skuDiscount = (sit: Situation, sku: SkuName): number | null =>
 export function simulate(A: Assumptions, input: SimInput): SimResult {
   const sit = findSituation(A, input.situation) ?? A.situations[0];
   const lm = lastMileNet(A);
+  const manual = input.discount ?? null;
   const rows: SimRow[] = A.skus.map((sku) => {
     const q = input.qty[sku.name] ?? 0;
-    const d = skuDiscount(sit, sku.name);
+    const d = manual ?? skuDiscount(sit, sku.name);
     const listTotal = d === null ? 0 : sku.listPrice * q;
     const discounted = d === null ? 0 : listTotal * (1 - d);
     return {
@@ -359,10 +362,10 @@ export function simulate(A: Assumptions, input: SimInput): SimResult {
     };
   });
   // 함께 구매(한 주문): 메인팩이 있으면 버라이어티는 애드온가 (3팩 번들은 애드온 딜에서 빠짐).
-  // 컴플리트 세트는 별도 주문이라 제외
+  // 수기 할인율이면 애드온가 대신 그 할인율을 그대로 쓴다. 컴플리트 세트는 별도 주문이라 제외
   const [m, b, v, c] = rows;
   const vs = findSku(A, "버라이어티 단품");
-  const vDiscounted = v.listTotal === 0 ? 0 : m.qty > 0 ? (vs?.addonPrice ?? 0) * v.qty : v.discounted;
+  const vDiscounted = v.listTotal === 0 ? 0 : m.qty > 0 && manual === null ? (vs?.addonPrice ?? 0) * v.qty : v.discounted;
   const discounted = m.discounted + b.discounted + vDiscounted;
   const combinedBase = {
     qty: m.qty + b.qty + v.qty,
